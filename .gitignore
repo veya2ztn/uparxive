@@ -17,3 +17,4 @@ wandb*
 sftp*
 *.json
 exp_hub
+notebook
