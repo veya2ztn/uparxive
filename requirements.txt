@@ -1,0 +1,11 @@
+lxml
+pandas
+matplotlib
+tqdm
+unidecode
+fuzzywuzzy
+nameparser
+elasticsearch
+grobid-client-python
+simple_parsing
+ray

@@ -1,0 +1,1 @@
+nohup redis-server --dir /nvme/zhangtianning.di/redis_cache > log/redis.log
