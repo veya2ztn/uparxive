@@ -19,6 +19,8 @@ The Uparxive dataset adheres to the following rules:
   - **In-line Math**: Single dollar signs `$` are used for in-line mathematical expressions, e.g., `$\alpha$`.
   - **Block Math**: Double dollar signs `$$` denote block mathematical expressions, e.g., `$$\mathbf{y}=\mathcal{F}(\mathbf{x},\{W_{i}\})+\mathbf{x}.$$`
 
+> See [1512.03385.json](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.json) and [1512.03385.md](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.md)
+
 # Download Url
  - uparxive[content only]
  - uparxive[with Reference]
