@@ -37,6 +37,61 @@ def split_citations(citation_text):
 
     return valid_citations
 
+def process_one_file(filepath, args):
+    filelist = os.listdir(filepath)
+    splited_ref =False
+    if not os.path.exists(os.path.join(filepath,'reference.txt')) and not os.path.exists(os.path.join(filepath,'reference.txt.bk')):
+        return
+
+    if os.path.exists(os.path.join(filepath,'reference.keys.bk')):
+        # os.remove(os.path.join(filepath,'reference.keys.bk'))
+        # os.remove(os.path.join(filepath,'reference.txt.bk'))
+        return 
+        # below is clean processing
+        os.rename(os.path.join(filepath,'reference.keys.bk'),os.path.join(filepath,'reference.keys'))
+        os.rename(os.path.join(filepath,'reference.txt.bk'),os.path.join(filepath,'reference.txt'))
+        name_list =  [
+                        'reference.grobid.tei.xml',
+                        'reference.structured.jsonl', 
+                        'reference.structured.anystyle.jsonl', 
+                        'reference.structured.grobid.jsonl', 
+                    #   'reference.keys.done','reference.txt.done',
+                    #   'reference.structured.jsonl.done',
+                    #   'reference.es_retrived_citation.json.done', 
+                    #   'reference.es_retrived_citation.json',
+                    #   'reference.es_retrived_citation.json',
+                    #   'reference.es_retrived_citation.json.done'
+                        ]
+        for name in name_list:
+            path = os.path.join(filepath,name)
+            if os.path.exists(path):
+                os.remove(f"{path}")
+        return
+    
+    #return
+    with open(os.path.join(filepath,'reference.keys'),'r') as f: citation_keys   = [line.strip() for line in f ]
+    with open(os.path.join(filepath,'reference.txt'),'r') as f:  citation_string = [line.strip() for line in f ]
+    
+    ### we will check the citation string and split then via ;
+    single_citation_string = []
+    single_citation_keys   = []
+    for key, citation in zip(citation_keys,citation_string):
+        citation = citation.strip(" .;:,")
+        for string in split_citations(citation):
+            string = string.strip()
+            if len(string)==0:continue
+            single_citation_string.append(string)
+            single_citation_keys.append(key)
+    os.rename(os.path.join(filepath,'reference.keys'),os.path.join(filepath,'reference.keys.bk'))
+    os.rename(os.path.join(filepath,'reference.txt'),os.path.join(filepath,'reference.txt.bk'))
+    with open(os.path.join(filepath,'reference.keys'),'w') as f: 
+        for line in single_citation_keys: f.write(line+'\n')
+    with open(os.path.join(filepath,'reference.txt'), 'w') as f:  
+        for line in single_citation_string: f.write(line+'\n')
+
+def process_one_file_wrapper(args):
+    arxiv_path, args = args
+    process_one_file(arxiv_path,args)
 
 if __name__ == '__main__':
     import os
@@ -49,7 +104,7 @@ if __name__ == '__main__':
     parser.add_argument("--index_part", type=int, default=0)
     parser.add_argument('--num_parts', type=int, default=1)
     parser.add_argument('--redo', action='store_true', help='', default=False)
-
+    parser.add_argument('--datapath', type=str, default=None)
     args = parser.parse_args()
     verbose = False
     ROOT_PATH = args.root_path# '/nvme/zhangtianning/datasets/whole_arxiv_data/whole_arxiv_all_files/successed_xml.filelist'
@@ -69,6 +124,9 @@ if __name__ == '__main__':
             alread_processing_file_list = os.listdir(ROOT_PATH)
     else:
         raise NotImplementedError
+    
+    if args.datapath:
+        alread_processing_file_list = [os.path.join(args.datapath, t) for t in alread_processing_file_list]
     index_part= args.index_part
     num_parts = args.num_parts 
     totally_paper_num = len(alread_processing_file_list)

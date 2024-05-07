@@ -54,8 +54,8 @@ def process_one_path(ROOTPATH, args:MergeStructureConfig):
         with open(reference_path,'r') as f:
             real_lines = [t.strip() for t in f.readlines()]
         if len(anystyle_lines) != len(grobid_lines):
-            tqdm.write(f"why the two files have different length {len(anystyle_lines)} {len(grobid_lines)} it should be {len(real_lines)}. See \n ====> {ROOTPATH}")
-            return arxiv_id,'different_length'
+            if args.verbose:tqdm.write(f"why the two files have different length {len(anystyle_lines)} {len(grobid_lines)} it should be {len(real_lines)}. See \n ====> {ROOTPATH}")
+            return ROOTPATH,'different_length'
                         
 
     length = len(anystyle_lines) if anystyle_lines is not None else len(grobid_lines)

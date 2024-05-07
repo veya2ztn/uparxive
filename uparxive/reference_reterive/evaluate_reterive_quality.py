@@ -3,252 +3,128 @@ import sys
 import pathlib
 import traceback
 from pathlib import Path
-
-module_dir = str(Path(__file__).resolve().parent)
-
-# Add this directory to sys.path
-if module_dir not in sys.path:
-    sys.path.append(module_dir)
-
-from Reference import *
+from .Reference import *
 import os,json
 from tqdm.auto import tqdm
+from uparxive.batch_run_utils import BatchModeConfig, dataclass
+from simple_parsing import field
 
-force_recompute_score = True
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser('parse tf.event file to wandb', add_help=False)
-    parser.add_argument('--root',type=str)
-    parser.add_argument('--mode',type=str,default='normal', choices=['normal', 'remove_retrevied_citation','redo'])
-    parser.add_argument('--structure_name', type=str, default='anystyle', choices=['anystyle', 'grobid','sentense'])
-    args = parser.parse_known_args()[0]
+@dataclass 
+class QualityESConfig(BatchModeConfig):
+    task_name = "quality_es_retrieve"
+    force_recompute_score: bool = False
+    mode : str = field(default='normal', choices=['normal', 'remove_retrevied_citation','redo'])
+    upper_score : float = 0.95
+    lower_score : float = 0.5
+    batch_retrieve: int = 0
 
-    ROOTDIR = args.root #"/nvme/zhangtianning/datasets/whole_arxiv_data/whole_arxiv_old_quant_ph"
-    if os.path.isdir(ROOTDIR):
-        alread_processing_file_list = os.listdir(os.path.join(ROOTDIR, 'unprocessed_json'))
-    elif os.path.isfile(ROOTDIR):
-        with open(ROOTDIR,'r') as f:
-            alread_processing_file_list = [line.strip() for line in f]
-        assert not os.path.isfile(alread_processing_file_list[0]),"should be arxiv id xxxx.xxxx"
-        while True:
-            ROOTDIR = os.path.dirname(ROOTDIR)
-            if 'unprocessed_json' in os.listdir(ROOTDIR):break
-            if len(ROOTDIR) < 4:
-                continue
+def analysis_quality_of_retrieve_result(retrieve_results:List[dict], args:QualityESConfig):
+    """
+    input is a path: 2304.01850/uparxive/Reference/reference.es_retrived_citation.json
+        This function will analysis the quality of the retrieve result and produce the final retrieve result
+        - if the score too small, usually means
+            - the content is not archieve in our citation database
+            - the citation information is too small to find a reference
+        - if the score is considerable and two of the three retrieve engine produce the same result, we can consider the result is correct
+    """
+    # retrieve_result must be placed in sorted score
+    if len(retrieve_results) ==0:
+        return {'retrieved_level': 0, 'candidate': {}}
+    if retrieve_results[0].get('unique_id') == 'the_is_a_note':
+        return {'retrieved_level': -1, 'candidate':retrieve_results[0]}   
+    retrieve_results.sort(key=lambda x:x['score'],reverse=True)
+    if retrieve_results[0]['score'] == 1:
+        # the score is high enough, we can consider the result is correct
+        return {'retrieved_level': 5, 'candidate':retrieve_results[0]}   
+    if retrieve_results[0]['score'] > args.upper_score:
+        # the score is high enough, we can consider the result is correct
+        return {'retrieved_level': 4, 'candidate':retrieve_results[0]}
+    if retrieve_results[0]['score'] < args.lower_score:
+        # the score is too small, we can consider the result is wrong
+        return {'retrieved_level': 0, 'candidate':retrieve_results[0]}
+    ## lets get the score for each retrieve engine
+    best_result_for_each_engine = {}
+    for retrieve_result in retrieve_results:
+        engine = retrieve_result['from_structure']
+        if engine in best_result_for_each_engine:continue
+        best_result_for_each_engine[engine] = retrieve_result
+    
+    retrieve_results = list(best_result_for_each_engine.values())
+    #retrieve_results.sort(key=lambda x:x['score'],reverse=True)   
+    if len(retrieve_results) == 1:
+        # if only one engine produce the result, we can consider the result is wrong
+        return {'retrieved_level': 2, 'candidate':retrieve_results[0]}
     else:
-        raise NotImplementedError
+        # if two engine produce the same result, we can consider the result is correct
+        result1,resutl2 = retrieve_results[0:2] ### the first two result and must be different engine
+        title1 = result1.get('title',"aaaa")
+        title2 = resutl2.get('title',"bbbb")
+        if fuzz.ratio(title1, title2) > 0.95:
+            return {'retrieved_level':3, 'candidate':retrieve_results[0]}
+        
+        ### check title first, because it cover unique_id check
+        ref1   = Reference.load_from_dict(result1)
+        ref2   = Reference.load_from_dict(resutl2)
+        
+        if ref1.unique_id and ref2.unique_id and ref1.unique_id.is_same(ref2.unique_id):
+                return {'retrieved_level':3, 'candidate':retrieve_results[0]}
+       
+    
+    return {'retrieved_level':1, 'candidate':retrieve_results[0]}
 
-    ROOT = ROOTDIR
-    ROOTDIR = os.path.join(ROOT, 'unprocessed_json')
-    ArxivIDs= alread_processing_file_list
-    Analysys={'Missing_Structured.JSON':[],
-            'Missing_Reterive.Citation':[],
-            'Pass.DifferentLength':[],
-            'Pass.HasFailFactCheck':[],
-            'Reterive.AllDone':[],
-            'Reterive.Part':[],
-            'Reterive.Finish.Rows':0,
-            'Reterive.Missing.Rows':0,
-            'Fail_Case':[]
-            }
-    count = 0
+def analysis_quality_of_retrieve_result_wrapper(args):
+    retrieve_results, args = args
+    return analysis_quality_of_retrieve_result(retrieve_results, args)
+    
+from multiprocessing import Pool
+def process_results(result_per_keys, args:QualityESConfig):
+    num_processes = args.batch_retrieve
+    
+    if num_processes == 0:
+        results = []
+        bar = tqdm(result_per_keys, leave=False,position=1) if args.verbose else result_per_keys
+        for result in bar:
+            results.append(analysis_quality_of_retrieve_result(result, args))
+        return results
+    else:
+        assert args.batch_num == 0, "do multiprocessing either in process_one_path or in process_one_reflist"
+        with Pool(processes=num_processes) as pool:
+            args_list = [(result, args) for result in result_per_keys]
+            results = list(tqdm(pool.imap(analysis_quality_of_retrieve_result_wrapper, args_list), total=len(result_per_keys), leave=False,position=1))
+    return results
 
-    for i,arxiv_id in enumerate(tqdm(ArxivIDs)):
-        #if i <30332:continue
-        try:
-            paper_fold = os.path.join(ROOTDIR, arxiv_id)
-            paper_files= os.listdir(paper_fold)
-            if args.mode != 'remove_retrevied_citation':
-                # if 'reference.structured.jsonl' not in paper_files:
-                #     Analysys['Missing_Structured.JSON'].append(arxiv_id)
-                #     continue
-                # if f'reference.es_retrived_citation.json' not in paper_files:
-                #     Analysys['Missing_Reterive.Citation'].append(arxiv_id)
-                #     continue   
-                pass
-            
-            
-            path = os.path.join(paper_fold,'reference.structured.jsonl.done')
-            if os.path.exists(path) and not args.mode == 'redo':
-                path = os.path.join(paper_fold,'reference.txt.done')
-                with open(path,'r') as f:
-                    reference_txts = [t.strip() for t in f]   
-                Analysys['Reterive.Finish.Rows' ]+=len(reference_txts)
-                if os.path.getsize(os.path.join(paper_fold,'reference.keys'))==0:
-                    Analysys['Reterive.AllDone'].append(arxiv_id)
-                    
-                    continue
-                else:
-                    Analysys['Reterive.Part'].append(arxiv_id)
-                    path = os.path.join(paper_fold,'reference.txt')
-                    with open(path,'r') as f:
-                        reference_txts = [t.strip() for t in f]   
-                    Analysys['Reterive.Missing.Rows' ]+=len(reference_txts)
-                    if args.mode == 'remove_retrevied_citation':
-                        for name in [f'reference.es_retrived_citation.json', 
-                                      #'reference.structured.jsonl',
-                                      'reference.grobid.tei.xml',
-                                      
-                                     ]:
-                            path = os.path.join(paper_fold,name)
-                            if os.path.exists(path):os.remove(path) 
-                        
-                continue
-            
-            done_reference_strings = read_jsonl(os.path.join(paper_fold,'reference.structured.jsonl.done'))
-            done_reterive_results  = read_jsonl(os.path.join(paper_fold,f'reference.es_retrived_citation.json.done'))
-            done_reference_keys    = read_linefile(os.path.join(paper_fold,'reference.keys.done'))
-            done_reference_txts    = read_linefile(os.path.join(paper_fold,'reference.txt.done'))
+def process_one_path(retrieve_results_path:str, args:QualityESConfig):
+    """
+    Input:
+        retrieve_results_path: 2304.01850/uparxive/Reference/reference.es_retrived_citation.json
+    """
+    assert os.path.isfile(retrieve_results_path), f"{retrieve_results_path} is not a file"
+    arxiv_id   = retrieve_results_path.rsplit("/")[-4]
+    OUTPUTDIR  = os.path.dirname(retrieve_results_path)
+    OUTPUTPATH = os.path.join(OUTPUTDIR,f"reference.retrived_results_final.json")
+    if os.path.exists(OUTPUTPATH) and not args.redo:
+        return arxiv_id, 'already_done'
 
-            
-            
+    with open(retrieve_results_path, 'r') as f:
+        result_per_keys = json.load(f)
+    
+    if args.verbose:tqdm.write(f"now deal with ====> [{arxiv_id}]")
 
-
-            reference_keys    = read_linefile(os.path.join(paper_fold,'reference.keys'))
-            reference_txts    = read_linefile(os.path.join(paper_fold,'reference.txt'))
-
-            reference_strings_path = os.path.join(paper_fold,'reference.structured.jsonl')
-            if not os.path.exists(reference_strings_path):
-                if len(reference_keys) == 0 and len(reference_txts)==0:
-                    reference_strings=[]
-                else:
-                    #print(f"{arxiv_id} has no reterive results reference_keys={len(reference_keys)} reference_txts={len(reference_txts)}")
-                    Analysys['Missing_Structured.JSON'].append(arxiv_id)
-                    continue
-            else:
-                reference_strings = read_jsonl(reference_strings_path)
-            
-            reterive_results_path  = os.path.join(paper_fold,'reference.es_retrived_citation.json')
-            if not os.path.exists(reterive_results_path):
-                if len(reference_keys) == 0 and len(reference_txts)==0:
-                    reterive_results=[]
-                else:
-                    #print(f"{arxiv_id} has no reterive results reference_keys={len(reference_keys)} reference_txts={len(reference_txts)}")
-                    Analysys['Missing_Reterive.Citation'].append(arxiv_id)
-                    continue
-            else:
-                reterive_results  = read_jsonl(reterive_results_path)
-            
-                
-                
-
-
-            if args.mode == 'redo':
-                reference_strings = reference_strings + done_reference_strings
-                reterive_results  = reterive_results  + done_reterive_results 
-                reference_keys    = reference_keys    + done_reference_keys   
-                reference_txts    = reference_txts    + done_reference_txts   
-                done_reference_strings = []
-                done_reterive_results  = []
-                done_reference_keys    = []
-                done_reference_txts    = []
-            
-            if len(reference_strings) != len(reterive_results):
-                Analysys['Pass.DifferentLength'].append(arxiv_id)
-                continue
-            
-            fail_reference_keys=[]
-            fail_reference_txts=[]
-            fail_reference_strings = []
-            fail_reterive_results = []
-            for index, (structured_citation, paper_information, citation_txt, citation_key) in enumerate(zip(reference_strings, reterive_results,reference_txts, reference_keys)):
-                correct_pool = structured_citation[args.structure_name] if args.structure_name in structured_citation else structured_citation
-                if correct_pool is None:continue
-                ref       = Reference.load_from_dict(correct_pool) 
-                #print(paper_information)
-                if isinstance(paper_information,list):
-                    result = paper_information
-                elif isinstance(paper_information,dict):
-                    if 'hits' in paper_information:
-                        if len(paper_information['hits']['hits'])<1:
-                            result = None
-                        else:
-                            result = paper_information['hits']['hits'][0]['_source']
-                    else:
-                        result = paper_information
-                    result = [result]
-                else:
-                    raise ValueError(f"paper_information type is {type(paper_information)}")
-                
-                scored_result = []
-                for t in result:
-                    if t is None:
-                        scored_result.append({'NotFind': 1,'score':0})
-                        break
-                    if 'unique_id' in t: 
-                        scored_result.append(t|{'score':1})
-                        break
-                    if '_source' in t: t=t['_source']
-                    candidate = Reference.load_from_dict(t)
-                    if 'score' not in t or force_recompute_score:
-                        score = similarity_structured(candidate,ref)
-                        t['score']=score
-                    scored_result.append(t)
-                scored_result.sort(key=lambda x:x['score'],reverse=True)    
-                
-                result = scored_result[0]
-                score  = result['score']
-                #print("======")
-                passQ = score> 0.8
-                if passQ:
-                    done_reference_keys.append(citation_key)
-                    done_reference_txts.append(citation_txt)
-                    done_reterive_results.append(result|{'score':score})
-                    done_reference_strings.append(structured_citation)
-                else:
-                    fail_reference_keys.append(citation_key)
-                    fail_reference_txts.append(citation_txt)
-                    fail_reterive_results.append(result|{'score':score})
-                    fail_reference_strings.append(structured_citation)
-
-        except KeyboardInterrupt:
-            raise
-        except:
+    #results = process_one_reflist(final_ref_list, es, args)
+    try:
+        results = process_results(result_per_keys, args)
+        assert len(results) == len(result_per_keys)
+        with open(OUTPUTPATH, 'w') as f:
+            json.dump(results, f)
+        return arxiv_id, 'pass'
+    except:
+        if args.debug : 
+            tqdm.write(f"Error in {retrieve_results_path}")
             traceback.print_exc()
-            Analysys['Fail_Case'].append(arxiv_id)
-            print(arxiv_id)
-            continue
-        
-        save_linefile(os.path.join(paper_fold,'reference.keys.done'),done_reference_keys)
-        save_linefile(os.path.join(paper_fold,'reference.txt.done'),done_reference_txts)
-        save_jsonl(os.path.join(paper_fold,'reference.structured.jsonl.done'),done_reference_strings)
-        save_jsonl(os.path.join(paper_fold,f'reference.es_retrived_citation.json.done'),done_reterive_results)
-        
-        save_linefile(os.path.join(paper_fold,'reference.keys'),fail_reference_keys)
-        save_linefile(os.path.join(paper_fold,'reference.txt'),fail_reference_txts)
-        save_jsonl(os.path.join(paper_fold,'reference.structured.jsonl'),fail_reference_strings)
-        save_jsonl(os.path.join(paper_fold,f'reference.es_retrived_citation.json'),fail_reterive_results)
-    for k,v in Analysys.items():
-        if isinstance(v, list):
-            print(f"{k}=>{len(v)}")
-        else:
-            print(f"{k}=>{v}")
-    
+            raise
+        return arxiv_id, 'error'
 
-    #print(Analysys['Reterive.Part'][0])
-    SAVEROOT = os.path.join(ROOT, 'analysis.eval_reterive_quality')
-    os.makedirs(SAVEROOT, exist_ok=True)
-    with open(os.path.join(SAVEROOT,'reterive.alldone'),'w') as f:
-        for arxiv_id in Analysys['Reterive.AllDone']:
-            f.write(arxiv_id+'\n')
-    
-    with open(os.path.join(SAVEROOT,'reterive.remain'),'w') as f:
-        for arxiv_id in Analysys['Reterive.Part']:
-            f.write(arxiv_id+'\n')
-    
-    with open(os.path.join(SAVEROOT,'DifferentLength.remain'),'w') as f:
-        for arxiv_id in Analysys['Pass.DifferentLength']:
-            f.write(arxiv_id+'\n')
+def process_one_path_wrapper(args):
+    arxiv_path, args = args
+    return process_one_path(arxiv_path, args) 
 
-    if len(Analysys['Fail_Case'])>0:
-        with open(os.path.join(SAVEROOT,'Fail_Case.remain'),'w') as f:
-            for arxiv_id in Analysys['Fail_Case']:
-                f.write(arxiv_id+'\n')
-
-    with open(os.path.join(SAVEROOT,'Missing_Structured.remain'),'w') as f:
-        for arxiv_id in Analysys['Missing_Structured.JSON']:
-            f.write(arxiv_id+'\n')
-    
-    with open(os.path.join(SAVEROOT,'Missing_Reterive.remain'),'w') as f:
-        for arxiv_id in Analysys['Missing_Reterive.Citation']:
-            f.write(arxiv_id+'\n')
-                

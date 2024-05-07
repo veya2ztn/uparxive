@@ -2,8 +2,12 @@
 import re
 from lxml import etree
 from typing import List, Optional
-
-
+import os
+from tqdm.auto import tqdm
+import numpy as np
+import traceback,json
+import argparse, logging
+from pathlib import Path
 
 def contains_arxiv_id(text):
     # Regular expression pattern for matching ArXiv IDs
@@ -17,7 +21,7 @@ def contains_arxiv_id(text):
     return match
 
 
-def obtain_reference_list(tmp_xml_path):
+def obtain_reference_list(tmp_xml_path,args):
     reference_string_path = tmp_xml_path.replace('reference.grobid.tei.xml','reference.txt')
     with open(reference_string_path,'r') as f:
         string_list = [line.strip() for line in f ]
@@ -100,6 +104,41 @@ def obtain_reference_list(tmp_xml_path):
         bibliography.append(bib_pool)
 
     return bibliography
+
+
+def process_one_path(ROOTPATH, args):
+    if not os.path.exists(ROOTPATH):
+        return ROOTPATH, 'no_root'
+    filepath = os.path.join(ROOTPATH,'reference.grobid.tei.xml')
+    targetpath=os.path.join(ROOTPATH,'reference.structured.grobid.jsonl')
+    
+    # bad_reference_path = Path(ROOTPATH).glob("reference_*")
+    # for bad_reference in bad_reference_path:
+    #     #print(bad_reference)
+    #     #raise
+    #     os.remove(bad_reference)
+    reference_path = os.path.join(ROOTPATH,'reference.txt')
+    if not os.path.exists(reference_path):
+        return ROOTPATH, 'no_ref_file'
+    if os.path.getsize(reference_path) == 0:
+        return ROOTPATH, 'empty_ref_file'
+    if not os.path.exists(filepath):
+        return ROOTPATH,'no_source'
+    if os.path.exists(targetpath) and not args.redo:
+        return ROOTPATH,'skip'
+    try:
+        bibliography = obtain_reference_list(filepath, args)
+        with open(targetpath,'w') as f: 
+            json.dump(bibliography,f)
+        return ROOTPATH,'pass'
+    except KeyboardInterrupt:
+        raise KeyboardInterrupt
+    except:
+        return ROOTPATH,'fail'
+    
+def process_one_file_wrapper(args):
+    arxiv_path, args = args
+    return process_one_path(arxiv_path,args)
 
 if __name__ == '__main__':
     # import sys
@@ -214,7 +253,7 @@ if __name__ == '__main__':
         #     traceback.print_exc() 
     #print(f"fail case {len(fail_filenames)}")
     
-    #root_path = '/nvme/zhangtianning/datasets/whole_arxiv_data/whole_arxiv_all_files/analysis.reterive_reference/convert_grobid/'
+    root_path = '/nvme/zhangtianning/datasets/whole_arxiv_data/whole_arxiv_all_files/analysis.reterive_reference/convert_grobid/'
     os.makedirs(root_path,exist_ok=True)
     if num_parts > 1:
         for key, val in analysis.items():

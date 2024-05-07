@@ -27,7 +27,9 @@ class RetrieveESConfig(BatchModeConfig):
     verbose : bool = False
     notchecknote : bool = False
     task_name = 'retrieve_reference'
-    
+    batch_retrieve: int = 0
+
+
 def contains_arxiv_id(text):
     # Regular expression pattern for matching ArXiv IDs
     # It matches "arXiv:" or "arXiv" followed by optional space(s) and the ID pattern
@@ -284,7 +286,8 @@ def retrieve_reference(es,ref,num,search_engine):
         raise NotImplementedError
     return result 
 
-def process_one_reflist(reflist, es, args:RetrieveESConfig):
+def process_one_reflist(reflist, args:RetrieveESConfig, es=None):
+    if es is None:es = get_es(args)
     search_engine = args.search_engine 
     score_limit=args.score_limit
     verbose =args.verbose
@@ -305,6 +308,14 @@ def process_one_reflist(reflist, es, args:RetrieveESConfig):
         whole_results.append(results)
     return whole_results
 
+def process_one_reflist_wrapper(args):
+    ref, args = args
+    args.verbose = False
+    try:
+        return process_one_reflist([ref], args)[0]
+    except:
+        tqdm.write(f'fail ref!!! ==> \n {ref }')
+        return {'status': 'Fail'}
 
 def normlize_one_string(string):
     string = string.lower().replace('\n', " ")
@@ -375,12 +386,32 @@ def build_the_structured_citation_pool(INPUTPATH, REFTEXT):
 
     final_ref_list = []
     for refdualpool, text in zip(reflist,reftext):
+        if len(text)>6000: 
+            text = text[:3000] + "...." + text[-3000:] ### <=== some ref such as 2304.01850 has very long text
         final_ref_list.append(refdualpool|{'plain_sentense':{'content':text}})
     return final_ref_list
 
-def process_one_path(ROOTDIR, args:RetrieveESConfig):
+from multiprocessing import Pool
+def process_refs(ref_list, args:RetrieveESConfig, es):
+    num_processes = args.batch_retrieve
+    
+    if num_processes == 0:
+        results = process_one_reflist(ref_list, args,es)
+        return results
+    else:
+        assert args.batch_num == 0, "do multiprocessing either in process_one_path or in process_one_reflist"
+        with Pool(processes=num_processes) as pool:
+            args_list = [(file, args) for file in ref_list]
+            results = list(tqdm(pool.imap(process_one_reflist_wrapper, args_list), total=len(ref_list), leave=False,position=1))
+    return results
+
+def get_es(args:RetrieveESConfig):
     selected_engine = f"http://localhost:{args.port}"
     es = Elasticsearch(selected_engine,request_timeout=1000)
+    return es
+
+def process_one_path(ROOTDIR, args:RetrieveESConfig):
+    es = get_es(args)
     #es.indices.refresh(index='integrate20240311')
     arxiv_id = ROOTDIR.rstrip('/').split('/')[-3]
     INPUTPATH  = os.path.join(ROOTDIR,'reference.structured.jsonl')
@@ -399,7 +430,8 @@ def process_one_path(ROOTDIR, args:RetrieveESConfig):
         final_ref_list = build_the_structured_citation_pool(INPUTPATH, REFTEXT)
         if args.verbose:tqdm.write(f"now deal with ====> [{arxiv_id}]")
     
-        results = process_one_reflist(final_ref_list, es, args)
+        #results = process_one_reflist(final_ref_list, es, args)
+        results = process_refs(final_ref_list, args, es)
         with open(OUTPUTPATH, 'w') as f:
             json.dump(results, f)
         return arxiv_id, 'pass'
@@ -414,6 +446,10 @@ def process_one_path(ROOTDIR, args:RetrieveESConfig):
 def process_one_path_wrapper(args):
     arxiv_path, args = args
     return process_one_path(arxiv_path, args) 
+
+
+
+
 if __name__ == '__main__':
     import os
     import sys

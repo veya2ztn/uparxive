@@ -6,23 +6,11 @@ module_dir = str(Path(__file__).resolve().parent.parent)
 if module_dir not in sys.path:sys.path.append(module_dir)
 
 
-from uparxive.reference_reterive.run_citation_parsing import process_file,ParseCitationConfig
+from uparxive.reference_reterive.run_citation_parsing import process_file_wrapper,ParseCitationConfig
 from simple_parsing import ArgumentParser
 from uparxive.batch_run_utils import obtain_processed_filelist, process_files,save_analysis
 import time
 
-def process_file_wrapper(args):
-    arxiv_path, args = args
-    ##### some case it will Connection reset by peer
-    ##### lets wait 10s and auto start 
-    while True:
-        try:
-            return process_file(arxiv_path, args)
-        except Exception as e:
-            if 'Connection reset by pe' in str(e):
-                time.sleep(10)
-            else:
-                raise e
 
 
     

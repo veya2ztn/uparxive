@@ -18,21 +18,68 @@ class UnarxivetoUparxiveConfig(BatchModeConfig):
     savepath: str
     task_name = 'unarxive_to_uparxive'
     reterive_result_mode : bool = False
-    
+    mode: str = 'normal'
+def create_bibitem_ref_metadata(data, output_dir, args):
+    os.makedirs(output_dir, exist_ok=True)
+    targetpath = os.path.join(output_dir, f'reference.retrieved.results')
+    if os.path.exists(targetpath) and not args.redo:
+        if args.verbose:tqdm.write(f'skip~~~')
+        return
+    undo_citation_keys   = []
+    undo_citation_string = []
+    done_citation_keys   = []
+    done_citation_string = []
+    done_citation_doi    = []
+    for key, valpool in data['bib_entries'].items():
 
+        citation = valpool.get('bib_entry_raw',"")
+        if not citation:continue
+
+        ids = valpool.get('ids',{})
+        unique_id = UniqueID.from_dict(ids)
+        if unique_id.is_nan() or ";" in citation.strip(';'):
+            undo_citation_keys.append(key)  
+            undo_citation_string.append(citation)  
+        else:
+            done_citation_keys.append(key)  
+            done_citation_string.append(citation.strip(';'))
+            done_citation_doi.append({k:val for k,val in unique_id.to_dict().items() if val})
+    keys            = undo_citation_keys
+    citation_string = undo_citation_string
+    with open(os.path.join(output_dir, f'reference.keys'), 'w') as f:
+        for key in keys:f.write(key+'\n')
+    with open(os.path.join(output_dir, f'reference.txt'), 'w') as f:
+        for string in citation_string:f.write(string+'\n')
+    #if len(done_citation_keys)>0:
+    with open(os.path.join(output_dir, f'reference.keys.retrieved'), 'w') as f:
+        for key in done_citation_keys:f.write(key+'\n')
+    with open(os.path.join(output_dir, f'reference.txt.retrieved'), 'w') as f:
+        for string in done_citation_string:f.write(string+'\n')
+    with open(os.path.join(output_dir, f'reference.retrieved.results'), 'w') as f:
+        json.dump(done_citation_doi, f, indent=2)
+
+import re
 def processing_data_from_unarxive_into_uparxive(data, args:UnarxivetoUparxiveConfig):
-    root_dir = args.savepath
+    
+    
     reterive_result_mode = args.reterive_result_mode
     metadata_i    = data['metadata']
     body_text_i   = data['body_text']
     bib_entries_i = data['bib_entries']
     ref_entries_i = data['ref_entries']
-    paper_id = data['paper_id']
-    paper_id = paper_id.replace('/',"_")
+    paper_id      = data['paper_id']
+    paper_id      = paper_id.replace('/',"_")
+    date = re.search(r"\d{4}", paper_id).group()
+    root_dir = os.path.join(args.savepath, date)
     output_dir = os.path.join(root_dir, paper_id, 'unarxive_clean')
     Content_Path = os.path.join(output_dir, f'{paper_id}.retrieved.json') if reterive_result_mode else os.path.join(output_dir, f'{paper_id}.json')
-    
-    #if os.path.exists(Content_Path):return
+    ReferenceDir = os.path.join(output_dir, 'Reference')
+    if args.mode == 'only_generate_bib':
+        create_bibitem_ref_metadata(data, ReferenceDir, args)
+        return 
+    if os.path.exists(Content_Path) and not args.redo:
+        if args.verbose:tqdm.write(f'skip~~~')
+        return
     os.makedirs(os.path.dirname(Content_Path),exist_ok=True)
     # get a dict for format citation/reference data
     insert_data = {}
@@ -181,12 +228,12 @@ def processing_data_from_unarxive_into_uparxive(data, args:UnarxivetoUparxiveCon
 
         ids = valpool.get('ids',{})
         unique_id = UniqueID.from_dict(ids)
-        if unique_id.is_nan():
+        if unique_id.is_nan() or ";" in citation.strip(';'):
             undo_citation_keys.append(key)  
             undo_citation_string.append(citation)  
         else:
             done_citation_keys.append(key)  
-            done_citation_string.append(citation)
+            done_citation_string.append(citation.strip(';'))
             done_citation_doi.append({k:val for k,val in unique_id.to_dict().items() if val})
 
     bibitem_ref_metadata = {k:v for k,v in zip(undo_citation_keys, undo_citation_string)}
@@ -209,33 +256,54 @@ def processing_data_from_unarxive_into_uparxive(data, args:UnarxivetoUparxiveCon
     if not reterive_result_mode:
         keys  = list(bibitem_ref_metadata.keys())
         citation_string = [bibitem_ref_metadata[key] for key in keys]
-        with open(os.path.join(output_dir, f'reference.keys'), 'w') as f:
+        with open(os.path.join(ReferenceDir, f'reference.keys'), 'w') as f:
             for key in keys:f.write(key+'\n')
-        with open(os.path.join(output_dir, f'reference.txt'), 'w') as f:
+        with open(os.path.join(ReferenceDir, f'reference.txt'), 'w') as f:
             for string in citation_string:f.write(string+'\n')
-        # with open(os.path.join(output_dir, f'bibitem_ref_metadata_not_in_context.json'), 'w') as f:
+        if len(done_citation_keys)>0:
+            with open(os.path.join(ReferenceDir, f'reference.keys.retrieved'), 'w') as f:
+                for key in done_citation_keys:f.write(key+'\n')
+            with open(os.path.join(ReferenceDir, f'reference.txt.retrieved'), 'w') as f:
+                for string in done_citation_string:f.write(string+'\n')
+            with open(os.path.join(ReferenceDir, f'reference.retrieved.results'), 'w') as f:
+                json.dump(done_citation_doi, f, indent=2)
+
+        # with open(os.path.join(output_dir, f'bibitem_ref_metad
+        # ata_not_in_context.json'), 'w') as f:
         #     json.dump(bibitem_ref_metadata_not_in_context, f, indent=2)
         # with open(os.path.join(output_dir, f'note_ref_metadata_not_in_context.json'), 'w') as f:
         #     json.dump(note_ref_metadata_not_in_context, f, indent=2)
 
+import traceback
+import pandas as pd
+from tqdm.auto import tqdm
 def processing_data_from_unarxive_into_uparxive_wrapper(args):
     arxiv_path, args = args
-    return processing_data_from_unarxive_into_uparxive(arxiv_path, args)
-
+    
+    with open(arxiv_path, 'r') as f:
+        wholedata = [t for t in f.readlines()]
+    bar = tqdm(wholedata, leave=False,position=1) if args.verbose else wholedata
+    for arxiv_data_json_string in bar:
+        arxiv_data = json.loads(arxiv_data_json_string)
+        try:
+            processing_data_from_unarxive_into_uparxive(arxiv_data, args)
+        except:
+            print(f"fail at {arxiv_data['paper_id']}")
+            if args.debug:
+                traceback.print_exc()
+                raise
+            continue
+    
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_arguments(BatchModeConfig, dest="config")
+    parser.add_arguments(UnarxivetoUparxiveConfig, dest="config")
     args = parser.parse_args()
     args = args.config
 
-    alread_processing_file_list = obtain_processed_filelist(args)
+    #alread_processing_file_list = obtain_processed_filelist(args)
+    with open("/nvme/zhangtianning.di/datasets/unarxive/whole_filelist.json",'r') as f:
+        alread_processing_file_list = json.load(f)
+    
     results = process_files(processing_data_from_unarxive_into_uparxive_wrapper, alread_processing_file_list, args)
     #print(results)
-    analysis= {}
-    for arxivid, _type in results:
-        if _type not in analysis:
-            analysis[_type] = []
-        analysis[_type].append(arxivid)
-    
-    totally_paper_num = len(alread_processing_file_list)
-    save_analysis(analysis, totally_paper_num==1, args)
+   

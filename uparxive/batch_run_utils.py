@@ -7,17 +7,19 @@ from dataclasses import dataclass
 
 @dataclass
 class BatchModeConfig:
+    task_name = 'temp'
     root_path : str
     
     index_part : int = 0
     num_parts : int = 1
-    datapath : str = "input"
+    datapath : str = None
     savepath : str = None
     logpath : str = "analysis"
     batch_num : int = 0
     redo : bool = False
     shuffle: bool = False
     debug:bool=False
+    verbose: bool = False
     def from_dict(kargs):
         return BatchModeConfig(**kargs)
     def to_dict(self):

@@ -20,6 +20,7 @@ class ParseCitationConfig(BatchModeConfig):
 import os
 from time import sleep
 import time
+from pathlib import Path
 def process_file(file_dir,args):
     verbose = args.verbose
     redo = args.redo
@@ -42,6 +43,10 @@ def process_file(file_dir,args):
         #print(grobid_output)
         grobid_result = 0
         if not os.path.exists(grobid_output) or redo:
+            #failed_path = list(Path(file_dir).glob("reference_*"))
+            # if len(failed_path)>0:
+            #     print(file_dir)
+            #     raise
             client.process("processCitationList", file_dir)
             timeout = 10
             starttime = time.time()
@@ -100,7 +105,8 @@ def process_file_wrapper(args):
             if 'Connection reset by pe' in str(e):
                 time.sleep(10)
             else:
-                raise e    
+                raise e
+
 
 if __name__ == '__main__':
     import os
