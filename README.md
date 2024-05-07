@@ -1,6 +1,6 @@
 # Uparxive
 
-The [uparxive](https://github.com/LLM4Science/unique_data_build) aims to provide a llm-friendly dataest for the whole arxiv .tex source. A similiar dataset is the [unarxive](https://github.com/IllDepence/unarXive), while the uparxvie use a different tool chain.
+The [uparxive](https://github.com/veya2ztn/uparxive) aims to provide a llm-friendly dataest for the whole arxiv .tex source. A similiar dataset is the [unarxive](https://github.com/IllDepence/unarXive), while the uparxvie use a different tool chain.
 
 The Uparxive dataset is stored in `.json` format, which can be seamlessly converted into Markdown `.md` format.
 
@@ -56,13 +56,13 @@ obtain the `.json` format data
   - `python python_script/tex_to_xml.py --root [SourPath]`
 - Convert the format `.xml` file to `.json` or `.md` file
   - ``python python_script/xml_to_json.py --root [SourPath]``
-- *Update 2025.04.30*: [html_to_dense_text.py](https://github.com/LLM4Science/unique_data_build/blob/main/uparxive/xml_to_json/html_to_dense_text.py) aim to convert the `ar5iv` dataset from `html` format to llm-friendly data.
+- *Update 2025.04.30*: [html_to_dense_text.py](https://github.com/veya2ztn/uparxive/blob/main/uparxive/xml_to_json/html_to_dense_text.py) aim to convert the `ar5iv` dataset from `html` format to llm-friendly data.
   - `python python_script/html_to_json.py --root [SourPath]`
 
 
 
 ### Advanced Usage: Referecne Retrieve: 
-Turn to the [Citation Retreive](https://github.com/LLM4Science/unique_data_build) for more details
+Turn to the [Citation Retreive](https://github.com/veya2ztn/uparxive) for more details
 
 - **Resource**: in order to retrieve the digital url for each citation string, you need collect the citation metadata from 
   - openalex snapshot: [official page](https://docs.openalex.org/download-all-data/download-to-your-machine) or the [aws s3 opendata](https://registry.opendata.aws/openalex/)
@@ -75,6 +75,6 @@ Turn to the [Citation Retreive](https://github.com/LLM4Science/unique_data_build
     - [Grobid](https://github.com/kermitt2/grobid)
   - Citation Retreive Engine:
     - [Elasticsearch](https://github.com/elastic/elasticsearch)
-  - [Citation_Retreive_Script](https://github.com/LLM4Science/unique_data_build/blob/main/uparxive/reference_reterive/citation_string_to_reference.py)
+  - [Citation_Retreive_Script](https://github.com/veya2ztn/uparxive/blob/main/uparxive/reference_reterive/citation_string_to_reference.py)
     
 
