@@ -19,13 +19,18 @@ The Uparxive dataset adheres to the following rules:
   - **In-line Math**: Single dollar signs `$` are used for in-line mathematical expressions, e.g., `$\alpha$`.
   - **Block Math**: Double dollar signs `$$` denote block mathematical expressions, e.g., `$$\mathbf{y}=\mathcal{F}(\mathbf{x},\{W_{i}\})+\mathbf{x}.$$`
 
-> See [1512.03385.json](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.json) and [1512.03385.md](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.md)
+> See [1512.03385.json](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.json) and [1512.03385.md](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.md) as example
 
 # Download Url
  - uparxive[content only]
  - uparxive[with Reference]
- - upar5iv[content only] 
- - upar5iv[content only] 
+ - upar5iv(uparxive version)[Coming Soon][License check]  
+ - unarxive(uparxive version)[Coming Soon][License check]   
+
+
+# Statistic
+Up to April 2024, there are around 2,450,893 papers in the arxiv source, and the uparxive dataset has covered 1,700,000 papers. Those missing parts are mainly due to the lack of the `.tex` source or the failure of the conversion process.
+![]()
 
 # Build from arxiv source
 
