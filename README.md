@@ -26,7 +26,7 @@ The Uparxive dataset adheres to the following rules:
  - uparxive[with Reference]
  - upar5iv(uparxive version)[Coming Soon][License check]  
  - unarxive(uparxive version)[Coming Soon][License check]   
-
+Note: The "full" version of uparxive was generated from all of *arXiv.org* including non-permissively licensed papers. Make sure that your use of the data is compliant with the paper's licensing terms. (For information on papers' licenses use [arXiv's bulk metadata access](https://info.arxiv.org/help/bulk_data/index.html)). 
 
 # Statistic
 Up to April 2024, there are around 2,450,893 papers in the arxiv source, and the uparxive dataset has covered 1,700,000 papers. Those missing parts are mainly due to the lack of the `.tex` source or the failure of the conversion process.
