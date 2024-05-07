@@ -30,7 +30,7 @@ The Uparxive dataset adheres to the following rules:
 
 # Statistic
 Up to April 2024, there are around 2,450,893 papers in the arxiv source, and the uparxive dataset has covered 1,700,000 papers. Those missing parts are mainly due to the lack of the `.tex` source or the failure of the conversion process.
-![]()
+![uparxive_analysis](https://github.com/veya2ztn/uparxive/blob/release/figures/uparxive_analysis.png?raw=true)
 
 # Build from arxiv source
 
