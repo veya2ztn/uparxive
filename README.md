@@ -22,9 +22,9 @@ The Uparxive dataset adheres to the following rules:
 > See [1512.03385.json](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.json) and [1512.03385.md](https://github.com/veya2ztn/uparxive/blob/release/example/1512/1512.03385/uparxive/1512.03385.md) as example
 
 # Download Url
-  - uparxive_metadata: [huggingface] (https://huggingface.co/datasets/LLM4SCIENCE/uparxive)
-  - uparxive: [huggingface] (https://huggingface.co/datasets/LLM4SCIENCE/uparxive)
-  - uparxive-reference:  [huggingface] (https://huggingface.co/datasets/LLM4SCIENCE/uparxive-reference)
+  - uparxive_metadata: [huggingface](https://huggingface.co/datasets/LLM4SCIENCE/uparxive)
+  - uparxive: [huggingface](https://huggingface.co/datasets/LLM4SCIENCE/uparxive)
+  - uparxive-reference:  [huggingface](https://huggingface.co/datasets/LLM4SCIENCE/uparxive-reference)
   - upar5iv(uparxive version)[Coming Soon][License check]  
   - unarxive(uparxive version)[Coming Soon][License check]  
 
