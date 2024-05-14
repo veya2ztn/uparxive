@@ -78,7 +78,9 @@ def find_last_pattern_index(s:str, pattern):
     return matches[-1].start()
 
 
-def go_ahead_and_add_label(left:str, label:str, paper_id:str):
+def go_ahead_and_add_label(left:str, label:str, paper_id:str, use_plain_citation:bool=False):
+    if use_plain_citation:
+        return left, label, False
     runtime_left = left.strip().strip("._-:").strip()
     lower_left   = runtime_left.lower() ### detect the end of the sentence is a name of ref like `In Sec:` or `In Sec.`
     ref_index    = find_last_pattern_index(lower_left, PATTERN_END_REF)
@@ -179,7 +181,9 @@ def shrink_brackets(input_string):
     input_string = re.sub(r'\]+', ']', input_string)
     return input_string
 
-def format_the_smart_citation(left, label, right, paper_id, automative_end = True):
+def format_the_smart_citation(left, label, right, paper_id, automative_end = True,use_plain_citation=False):
+
+    if use_plain_citation:return label
     citation_content = label
     # Determine if label is enclosed in angle brackets and format accordingly
     if label.startswith('<') and label.endswith('>'):
@@ -221,3 +225,23 @@ def collect_whole_reference(labels:dict, use_count_type_ref=False):
             else:
                 whole_label[k].append((key,v))
     return whole_label        
+def count_activate_latex_character(latex_string):
+    # Split the string to separate components, keeping LaTeX commands and handling escaped spaces
+    components = re.split(r'(?<!\\) ', latex_string)
+    
+    # Define a regex pattern to count effective characters:
+    # This pattern matches:
+    # - LaTeX commands possibly with arguments enclosed in curly braces
+    # - Single alphanumeric characters possibly followed by subscript or superscript
+    # - Individual arithmetic operators
+    pattern = r'\\[a-zA-Z]+\{[^}]*\}|\\[a-zA-Z]+|\w(?:_{[^}]*}|\^{[^}]*})?|[\w+-/*]'
+    
+    effective_count = 0
+    for component in components:
+        # Remove extra backslashes used for escaping in the split step
+        component = component.replace('\\ ', ' ')
+        # Find all matches that count as "effective characters"
+        matches = re.findall(pattern, component)
+        effective_count += len(matches)
+
+    return effective_count

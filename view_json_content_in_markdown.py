@@ -8,20 +8,17 @@ with open(JsonFilePath, 'r') as f:
 if content['abstract']:
     print("#","Abstract")
     print(content['abstract'])
-if content['sections']:
-    for section_num, section in enumerate(content['sections']):
-        if 'section_title' in section:
-            print("#", section['section_title'])
-        elif 'tag' in section:
-            print("#", 'Section', section['tag'])
-        elif 'section_num' in section:
-            print("#", 'Section', section['section_num'])
-        else:
-            print('#', 'Section', section_num)
-        for paragraph in section['section_content']:
+
+def print_sentense(sections_pool, level = 1):
+    if 'title' in sections_pool and sections_pool['title']:print("#"*level, sections_pool['title'])
+    if 'content' in sections_pool:
+        for paragraph in sections_pool['content']:
             if isinstance(paragraph, str):
-                paragraph = [paragraph]
-            for sentence in paragraph:
-                print(sentence.replace("$$","$"))
-            print('\n')
+                print(paragraph+'\n')
+            else:
+                print_sentense(paragraph, level+1)
+        
+
+if content['sections']:
+    print_sentense(content['sections'])
 

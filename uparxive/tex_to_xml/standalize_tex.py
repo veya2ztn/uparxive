@@ -5,6 +5,7 @@ from ..utils import get_tex_file_name
 @dataclass
 class TexStandardConfig(BatchModeConfig):
     modelist = ['clean', 'revtex','nopackage','clean_beta','revtex_beta']
+    extra_mode_list = ['prepare_for_color']
     mode : str = 'clean'
     task_name = 'tex_standard'
 
@@ -23,7 +24,7 @@ class TexStandardConfig(BatchModeConfig):
         return set(['morefloats','CJKutf8','floatrow','datetime2','biblatex'])
 
     def __post_init__(self ):
-        assert self.mode in self.modelist
+        assert self.mode in self.modelist + self.extra_mode_list
         import sys
         from pathlib import Path
         module_dir = str(Path(__file__).resolve().parent)
@@ -313,6 +314,7 @@ def standardize_one_file(file_path, args:TexStandardConfig):
     elif args.mode == 'nopackage':
         blacklist = args.blacklisted_packages2
         ForceQ = True
+    
     else:
         raise NotImplementedError
     
@@ -335,5 +337,13 @@ def standardize_one_file(file_path, args:TexStandardConfig):
     
 def standardize_one_file_wrapper(args):
     arxiv_path, args = args
-    return standardize_one_file(arxiv_path, args)
+    if args.mode == 'prepare_for_color':
+        lines_without_comments = read_the_tex_file_into_memory_without_comment(arxiv_path)
+        lines_without_comments = [line for line in lines_without_comments if line]
+        new_file_path = arxiv_path[:-4]+f'.{args.mode}.tex'
+        with open(new_file_path, 'w', encoding='utf-8') as file:
+            file.write("".join(lines_without_comments))
+        return new_file_path, 'finish'
+    else:
+        return standardize_one_file(arxiv_path, args)
 

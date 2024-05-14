@@ -19,8 +19,8 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 ### set the loger in warning mode
 log_level = os.environ.get('LOG_LEVEL', 'WARN')
-logging.basicConfig(level=log_level, format='Paper ID: %(paper_id)s - %(message)s')
-
+#logging.basicConfig(level=log_level, format='Paper ID: %(paper_id)s - %(message)s')
+logging.basicConfig(level=log_level, format='%(message)s')
 import traceback
 enable_checkCiteDontHaveBibRef = False
 enable_checkTooManyNote= True
@@ -192,7 +192,7 @@ def parse_bibitem(bibitem: BeautifulSoup,
     if filte_out_note:
         for bibblock in bibblocks:
             iscitationQ, hardcitationQ, reason = identify_bibblock_is_note_or_citation(bibblock,args)
-            break
+            if not iscitationQ:break
 
         if iscitationQ:
             iscitationQ = not should_the_string_be_regard_as_note(bibstring)
@@ -286,14 +286,13 @@ def remove_entire_bibliography_and_build_labels(soup: BeautifulSoup , refcount: 
         bio_element.decompose()
     return soup, bibitem_ref_labels, bibitem_ref_metadata, note_ref_labels, note_ref_metadata
 
-
 def extract_bibblock_html_soup(bibblockli:BeautifulSoup):
     bibblocks = bibblockli.find_all('span', class_='ltx_bibblock')
     # Combine the contents of the bibblocks into a single <span class="ltx_bibblock"> element
     merged_content = []
     for bibblock in bibblocks:
         merged_content.append(" ".join([str(t).strip() for t in bibblock.contents]))
-    merged_html = BeautifulSoup(f"""(Note: {' '.join(merged_content)} )""", 'html.parser')
+    merged_html = BeautifulSoup(f"""<p>(Note: {' '.join(merged_content)} )</p>""", 'html.parser').p
     return merged_html
 
 def put_note_string_back_into_each_sentence(soup: BeautifulSoup, 
@@ -430,7 +429,7 @@ def remove_note_and_record_the_infomration(soup: BeautifulSoup):
     primary_metadata = {}
 
     note    = soup.find(class_='ltx_note')
-    counter = LoopCounter()
+    counter = LoopCounter(len(soup.find_all(class_='ltx_note'))+10)
     while counter.increment() and note is not None:
         tag = label = f"footnote.{len(primary_labels)}"
         primary_labels[tag] = label
@@ -657,7 +656,12 @@ def check_no_figure_and_table_left(soup:BeautifulSoup):
         if len(remain_figure.text.strip())==0:
             remain_figure.decompose()
         else:
-            raise NotImplementedError(f"why there are still figure left, what left now is \n{pretty_view(remain_figure)})")
+            logging.info(f"There are still figure left, seem a plain table, we store it")
+            key = label = f'extra_figure_{len(extra_figure_label)}'
+            extra_figure_label[key] = label
+            extra_figure_metadata[key] = copy.deepcopy(remain_figure)
+            remain_figure.decompose()
+            #raise NotImplementedError(f"why there are still figure left, what left now is \n{pretty_view(remain_figure)})")
 
     extra_table_label = {}
     extra_table_metadata = {}
@@ -689,7 +693,7 @@ def can_be_regard_as_math(tag:BeautifulSoup):
 def replace_tabular_into_markdown(table:BeautifulSoup):
     rows = table.find_all('tr')
     markdown_table = []
-
+ 
     # Process each row
     for row in rows:
         cells = row.find_all('td')
@@ -746,9 +750,10 @@ def revert_the_block_equation_into_latex(soup:BeautifulSoup):
         tags = block_equation.find_all(class_='ltx_tag_equation')
         label= None
         tag  = None
-        if len(tags) > 0:
-            assert len(tags) == 1, f"Why this element \n{pretty_view(block_equation)} has multiple tags??"
-            tag = tags[0]
+        for tag in tags:
+        #if len(tags) > 0:
+            #assert len(tags) == 1, f"Why this element \n{pretty_view(block_equation)} has multiple tags??"
+            #tag = tags[0]
             tag_str = tag.text.strip()
             parent  = block_equation
             deepth  = 0
@@ -789,7 +794,6 @@ def revert_the_block_equation_into_latex(soup:BeautifulSoup):
         block_equation = soup.find(class_='ltx_equation')
     return primary_labels, table_label, table_metadata
 
-
 def reverse_identify_tag_and_its_label(soup,primary_labels,prefix):
     tags = soup.find_all(class_='ltx_tag')
     for tag in tags:
@@ -807,8 +811,6 @@ def reverse_identify_tag_and_its_label(soup,primary_labels,prefix):
             tag_key = tag.text
             primary_labels[label] = tag_key
         
-
-
 def revert_the_block_equationgroup_into_latex(soup:BeautifulSoup):
     """
     Equationgroup for format block equation like 
@@ -859,8 +861,6 @@ def revert_the_block_equationgroup_into_latex(soup:BeautifulSoup):
             #block_equation.replace_with(BeautifulSoup(f"""<p class="ltx_p">$$\n{math_latex}\n$$\n<p>""").p)
             #block_equation.replace_with(f"$$\n{math.get('alttext').strip()}\n$$\n")        
     return primary_labels
-
-
 
 def revert_all_the_math_to_latex(soup:BeautifulSoup):
     for math in soup.find_all('math'):
@@ -959,8 +959,6 @@ def collect_specific_section_and_remove(soup, name='ltx_appendix'):
         section.decompose()
     return whole_sections
     
-
-
 def collect_sections_to_content_old(soup):
     def is_other_section(tag):
         return tag.name == 'section' and 'ltx_subsection' not in tag.get('class',[]) and 'ltx_subsubsection' not in tag.get('class',[]) 
@@ -1119,6 +1117,8 @@ def recovery_citation_in_sentense(cite: BeautifulSoup, labels_reference: Dict[st
             if len(ref.text.strip())>0:
                 plain_ref.append(ref.text.strip())
                 ref.replace_with(ref.text.strip())
+            elif 'ltx_missing_citation' in ref.get('class',[]): # see /0505/cond-mat0505601.html
+                ref.decompose() 
             else:
                 raise NotImplementedError(f"Please check why this ref has no href:\n{ref}")
             
@@ -1277,26 +1277,7 @@ def collect_tags_and_record_all_labels(soup: BeautifulSoup):
             otherslabels[label_type][label.strip()] = tag.text.strip()
     return otherslabels
 
-def count_activate_latex_character(latex_string):
-    # Split the string to separate components, keeping LaTeX commands and handling escaped spaces
-    components = re.split(r'(?<!\\) ', latex_string)
-    
-    # Define a regex pattern to count effective characters:
-    # This pattern matches:
-    # - LaTeX commands possibly with arguments enclosed in curly braces
-    # - Single alphanumeric characters possibly followed by subscript or superscript
-    # - Individual arithmetic operators
-    pattern = r'\\[a-zA-Z]+\{[^}]*\}|\\[a-zA-Z]+|\w(?:_{[^}]*}|\^{[^}]*})?|[\w+-/*]'
-    
-    effective_count = 0
-    for component in components:
-        # Remove extra backslashes used for escaping in the split step
-        component = component.replace('\\ ', ' ')
-        # Find all matches that count as "effective characters"
-        matches = re.findall(pattern, component)
-        effective_count += len(matches)
 
-    return effective_count
 import logging
 
 
@@ -1316,11 +1297,12 @@ def deal_with_html_file(tmp_html_path, output_dir, args:HTMLtoJsonConfig)->str:
     use_count_type_ref  = not args.use_origin_ref_number
     reterive_result_mode=args.reterive_result_mode
     _paper_id =os.path.basename(tmp_html_path.replace('.html',''))
-    paper_filter = ContextFilter(_paper_id)
-    logging.getLogger().addFilter(paper_filter)
-    logging_redirect_tqdm()
+    #paper_filter = ContextFilter(_paper_id)
+    #logging.getLogger().addFilter(paper_filter)
+    #logging_redirect_tqdm()
     paper_id = f"ArXiv.{_paper_id}"
-    soup_whole = BeautifulSoup(open(tmp_html_path),'html.parser')
+    with open(tmp_html_path,'r',encoding='utf-8', errors='ignore') as f:
+        soup_whole = BeautifulSoup(f,'html.parser')
     soup = soup_whole.find('article')
     if not soup: return 'NoArticle'
     ReferenceDir= os.path.join(output_dir, "Reference")
