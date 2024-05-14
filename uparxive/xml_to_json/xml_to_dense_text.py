@@ -137,7 +137,7 @@ def identify_bibblock_is_note_or_citation(bibblock:BeautifulSoup, args)->Tuple[b
             reason        = 'has_ref'
             return iscitationQ, hardcitationQ, reason
     
-        #raise NotImplementedError(f"Lets have a look ==> {bibblock}")
+        #raise NotImplementedError(f"Lets have a look ] {bibblock}")
         
     for math_in_bib in bibblock.find_all('math'):
         latex = get_latex_from_math(math_in_bib)
@@ -147,7 +147,7 @@ def identify_bibblock_is_note_or_citation(bibblock:BeautifulSoup, args)->Tuple[b
             hardcitationQ = True
             reason = 'has_long_math'
             return iscitationQ, hardcitationQ, reason
-        #raise NotImplementedError(f"Lets have a look ==> {bibblock}")
+        #raise NotImplementedError(f"Lets have a look ] {bibblock}")
     
     return iscitationQ, hardcitationQ, None
                    
@@ -206,10 +206,10 @@ def discard_note(soup: BeautifulSoup,filte_out_note:bool):
 def retrieve_all_cite(soup:BeautifulSoup):
     """
     Retrieve all the citation in the soup
-        - Type 1: bib ==> <a class="ltx_ref" href="#bib.bib1" title="">1</a>
-        - Type 2: fig ==> <a class="ltx_ref" href="#S2.F2" title="Figure 2 ‣ 2 THE QUADRUPOLE TRANSITION TO THE Δ⁢(1232) ‣ Probing the Structure of Nucleons in the Resonance region with CLAS at Jefferson Lab"><span class="ltx_text ltx_ref_tag">2</span></a>,
-        - Type 3: tab ==> [TODO]: please give a check
-        - Type 3: math==> [TODO]: please give a check
+        - Type 1: bib ] <a class="ltx_ref" href="#bib.bib1" title="">1</a>
+        - Type 2: fig ] <a class="ltx_ref" href="#S2.F2" title="Figure 2 ‣ 2 THE QUADRUPOLE TRANSITION TO THE Δ⁢(1232) ‣ Probing the Structure of Nucleons in the Resonance region with CLAS at Jefferson Lab"><span class="ltx_text ltx_ref_tag">2</span></a>,
+        - Type 3: tab ] [TODO]: please give a check
+        - Type 3: math] [TODO]: please give a check
     """
     ref_count = {}
     for bibref in soup.find_all('bibref'):
@@ -295,7 +295,7 @@ def parse_bibitem(bibitem: BeautifulSoup,
     discard_text_format_in_sentense(bibitem)
     bibblocks = bibitem_new.find_all('bibblock')
     bibstring = better_latex_sentense_string(" ".join([bibblock.text for bibblock in bibblocks]))
-    #assert len(bibblocks)==1, f"why this reference string ==> {bibitem} <== has more then one bibblocks ==>{bibblocks}"
+    #assert len(bibblocks)==1, f"why this reference string ] {bibitem} ![ has more then one bibblocks ]{bibblocks}"
     iscitationQ  = True
     hardcitationQ= True
     reason       = None
@@ -426,7 +426,8 @@ def remove_figures_record_the_labels(soup: BeautifulSoup):
         ### ------------------- next, we collect the resource collect from this image
         markdown_input = figure_to_markdown(figure)
         primary_source[tag_label] = markdown_input
-        markdown_element = BeautifulSoup(f"<para><p>\n<--Figure:{tag_label}-->\n<\p><\para>",features='xml')
+        markdown_element = BeautifulSoup(f"<para><p>\n![Figure:{tag_label}]\n<\p><\para>",features='xml')
+        #print(markdown_element)
         #print(markdown_input)
         figure.replace_with(markdown_element)
         figure  = soup.find('figure')
@@ -563,7 +564,7 @@ def remove_tables_record_the_labels(soup: BeautifulSoup):
         
         markdown_input  = tabular_into_markdown(table)
         primary_source[tag_label] = markdown_input
-        markdown_element= BeautifulSoup(f"<para><p>\n<--Table:{tag_label}-->\n<\p><\para>",features='xml')
+        markdown_element= BeautifulSoup(f"<para><p>\n![Table:{tag_label}]\n<\p><\para>",features='xml')
         table.replace_with(markdown_element)
         table  = soup.find('table')
     return primary_labels, primary_metadata,primary_source
@@ -609,7 +610,7 @@ def remove_floats_record_the_labels(soup: BeautifulSoup):
         #     if source:
         #         markdown_input.append(f"![{sourceid}]({source})")
         #markdown_input  = "\n".join(markdown_input)
-        markdown_input = "===> Here is a float. <==="
+        markdown_input = "=] Here is a float. ![="
         markdown_element= BeautifulSoup(f"<p>\n{markdown_input}\n<p>",features='xml')
         float.replace_with(markdown_element)
         float  = soup.find('float')
@@ -705,7 +706,7 @@ def check_no_figure_and_table_left(soup:BeautifulSoup):
             extra_figure_label[key] = label
             extra_figure_metadata[key]={}
             extra_figure_source[key]= figure_to_markdown(copy.deepcopy(remain_figure))
-            markdown_element= BeautifulSoup(f"<para><p>\n<--Figure:{key}-->\n</p></para>",features='xml')
+            markdown_element= BeautifulSoup(f"<para><p>\n![Figure:{key}]\n</p></para>",features='xml')
             remain_figure.replace_with(markdown_element)
             #remain_figure.decompose()
             #raise NotImplementedError(f"why there are still figure left, what left now is \n{pretty_view(remain_figure)})")
@@ -726,13 +727,13 @@ def check_no_figure_and_table_left(soup:BeautifulSoup):
             extra_table_label[key]     = label
             extra_table_metadata[key]  = {}
             extra_table_source[key]    = tabular_into_markdown(copy.deepcopy(remain_table))
-            markdown_element= BeautifulSoup(f"<para><p>\n<--Table:{key}-->\n</p></para>",features='xml')
+            markdown_element= BeautifulSoup(f"<para><p>\n![Table:{key}]\n</p></para>",features='xml')
             remain_table.replace_with(markdown_element)
             #remain_table.decompose()
     # paper like quant-ph0003093.html will list the caption information in a table at the end of main content.
     # since it doesnt have any ref in code, we just delete the table directly
     # if len(soup.find_all('table'))>0:
-    #     logging.warning(f"there are still table left, we just remove them ======> ")
+    #     logging.warning(f"there are still table left, we just remove them ====] ")
     #     for table in soup.find_all('table'):
     #         if table:table.decompose()
     #assert len(soup.find_all('table'))==0, "why there are still table left"
@@ -845,7 +846,7 @@ def recovery_ref_in_sentense(ref: BeautifulSoup, labels_reference: Dict[str, str
             except KeyError:
                 logging.info(f"we want to use key = {labelref}, but the collect labels pool only have ")
                 for key,val in labels_reference.items():
-                    logging.info(f"{key} ==> {val}")
+                    logging.info(f"{key} ] {val}")
                 raise
             if len(reflabels)>1:
                 logging.info(f'multiple label detected for {labelref} => {reflabels}, we will use the first one')
@@ -1105,7 +1106,7 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
     new_soup,reference_labels,bibitem_ref_metadata,note_ref_labels, note_ref_metadata= remove_entire_bibliography_and_build_labels(new_soup,ref_count, args)
     if len(note_ref_metadata)>5:
         for key,val in note_ref_metadata.items():
-            logging.info(f"{key} ==> [ {better_latex_sentense_string(' '.join(val[1].text))} ]")
+            logging.info(f"{key} ] [ {better_latex_sentense_string(' '.join(val[1].text))} ]")
         checkTooManyNote(f'the note_ref_metadata num={len(note_ref_metadata) } is too much , please check the file {tmp_xml_path}')
         logging.warning('WARNING:Too Many note, we roll back to no note mode')
         args.passNote = True
@@ -1271,7 +1272,7 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
             json.dump(note_ref_metadata_not_in_context, f, indent=2)
     
         # for section in collect_whole_section_into_one_paper(tree):
-        #     logging.info(f"=========> {section['section_title']} <============")
+        #     logging.info(f"=======] {section['section_title']} ![==========")
         #     for paragraph in section['section_content']:
         #         logging.info("=======================")
         #         for sentense in paragraph:
@@ -1300,31 +1301,31 @@ def xml_to_json_one_path(file_path, args:XMLtoJsonConfig)->Tuple[str,str]:
     except KeyboardInterrupt:
         raise
     except MathDontHaveTex:
-        logging.info(f"MathDontHaveTex ===> {file_path}")
+        logging.info(f"MathDontHaveTex =] {file_path}")
         return arxivid,'MathDontHaveTex'
     except lxml.etree.XMLSyntaxError:
-        logging.info(f"bad xml file ===> {file_path}")
+        logging.info(f"bad xml file =] {file_path}")
         if args.verbose:traceback.print_exc()
         return arxivid,'badxml'
     except TooManyNoteError:
-        #logging.info(f"too many note ===> {file_path}")
+        #logging.info(f"too many note =] {file_path}")
         #analysis['TooManyNoteError'].append(file_path)
         return arxivid,'TooManyNoteError'
     except CiteDontHaveBibRefError:
-        #logging.info(f"cite dont have bibref ===> {file_path}")
+        #logging.info(f"cite dont have bibref =] {file_path}")
         #analysis['CiteDontHaveBibRefError'].append(file_path)
         return arxivid,'CiteDontHaveBibRefError'
     except MisMatchRefError:
-        #logging.info(f"mismatch ref ===> {file_path}")
+        #logging.info(f"mismatch ref =] {file_path}")
         #analysis['MisMatchRefError'].append(file_path)
         return arxivid,'MisMatchRefError'
     except:
         
         if args.verbose == 1:
             traceback.print_exc()
-        #tqdm.write(f"fail ===> {file_path}")
+        #tqdm.write(f"fail =] {file_path}")
         if args.debug:
-            logging.error(f"fail ===> {file_path}")
+            logging.error(f"fail =] {file_path}")
             raise
         return file_path,'Fail'
     
