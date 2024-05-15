@@ -54,6 +54,29 @@ class HTMLtoJsonConfig(BatchModeConfig):
     use_origin_ref_number : bool = False
     verbose: bool = False
     
+def get_label_of_the_element(soup: BeautifulSoup):
+    if soup is None:return None
+    if soup.attrs is None: return None
+    for key in ['key','labels','id']:
+        if soup.get(key):
+            return soup.get(key)
+    return None
+    
+def get_id_else_to_its_parent(soup: BeautifulSoup, max_depth=5,return_father= False):
+    parent = soup
+    deepath=0
+    while parent is not None and get_label_of_the_element(parent) is None:
+        parent = parent.parent
+        deepath+=1
+        if deepath>max_depth:break
+    if return_father:
+        return get_label_of_the_element(parent), parent
+    else:
+        return get_label_of_the_element(parent)
+
+
+
+
 def discard_note(soup:BeautifulSoup):
     for element in soup.find_all('ltx_note'):
         raise NotImplementedError
@@ -379,7 +402,7 @@ def remove_figures_record_the_labels_old(soup: BeautifulSoup):
         tag = tags[0].text.strip()
         tag = tag if tag else i+1
 
-        label  = caption_figure.get('id') ## ==> S2.F2.10
+        label  = get_id_else_to_its_parent(caption_figure) ## ==> S2.F2.10
         assert label is not None and len(label.strip())> 0, f"why this figure {caption_figure} has no label"
         primary_labels[label]   = tag
         primary_metadata[label] = copy.deepcopy(caption)
@@ -413,7 +436,10 @@ def find_tag_of_element(caption: BeautifulSoup, first_try_tag_name:str):
         raise NotImplementedError(f"Why this element \n{pretty_view(caption)} has multiple tags={len(tags)}??")
     #elif len(tags) == 0:
     logging.warning(f"Why this element \n{pretty_view(caption)} has no tags={len(tags)}??")
-    tags = caption.find_all(class_='ltx_tag')
+    def is_tried_tag(tag):
+        ### 2308/2308.01884.html
+        return 'ltx_tag' in tag.get('class', []) and 'ltx_tag_inline-item' not in tag.get('class', [])
+    tags = caption.find_all(is_tried_tag)
     if len(tags) == 0:
         logging.warning(f"No tag found even we degenerate the mode, seem a plain image. Please check:\n{caption}")
         return None
@@ -487,22 +513,17 @@ def remove_figures_record_the_labels(soup: BeautifulSoup):
             tag_obj = find_tag_of_element(caption, 'ltx_tag_figure')
             if tag_obj is not None and tag_obj.text.strip(): ### in 2106/2106.09756.html, you can find empty tag ,
                 tag = tag_obj.text.strip()
-                parent_of_caption = caption 
-                counter = LoopCounter()
-                while counter.increment() and  parent_of_caption.get('id') is None:
-                    parent_of_caption = parent_of_caption.parent
-                    if parent_of_caption == main_figure:break
-                label  = parent_of_caption.get('id') ## ==> S2.F2.10
+                label  = get_id_else_to_its_parent(caption)## ==> S2.F2.10
                 assert label is not None and len(label.strip())> 0, f"why this figure {caption} has no label"
                 primary_labels[label]   = tag
                 primary_metadata[label] = copy.deepcopy(caption)
                 addtag = True
         if len(whole_captions)==1 and main_figure.get('id') and addtag:
-            label = main_figure.get('id')
+            label = get_id_else_to_its_parent(main_figure)
             primary_labels[label]   = tag
             primary_metadata[label] = copy.deepcopy(caption)
         if len(whole_captions)==0:
-            tag = label = main_figure.get('id', f"Tab.{len(primary_labels)}")
+            tag = label = get_id_else_to_its_parent(main_figure) or (f"Tab.{len(primary_labels)}")
             primary_labels[label]   = tag
             primary_metadata[label] = copy.deepcopy(main_figure)
     for main_figure in soup.find_all(is_main_figure):    
@@ -539,12 +560,7 @@ def remove_floats_record_the_labels(soup: BeautifulSoup):
                 tag_obj = find_tag_of_element(caption, 'ltx_tag_float')
                 if tag_obj is not None and tag_obj.text.strip():
                     tag = tag_obj.text.strip()
-                    parent_of_caption = caption 
-                    counter = LoopCounter()
-                    while counter.increment() and  parent_of_caption.get('id') is None:
-                        parent_of_caption = parent_of_caption.parent
-                        if parent_of_caption == main_float:break
-                    label  = parent_of_caption.get('id') ## ==> S2.F2.10
+                    label  = get_id_else_to_its_parent(caption)
                     assert label is not None and len(label.strip())> 0, f"why this float {caption} has no label"
                 else:
                     tag = label = f"Floats.{len(primary_labels)}"
@@ -604,14 +620,8 @@ def remove_tables_record_the_labels(soup: BeautifulSoup, strict = True):
                 tag_obj = find_tag_of_element(caption, 'ltx_tag_table')
                 if tag_obj is not None and tag_obj.text.strip():
                     tag = tag_obj.text.strip()
-                    parent_of_caption = caption 
-                    deepath=0
-                    while parent_of_caption is not None and parent_of_caption.get('id') is None:
-                        parent_of_caption = parent_of_caption.parent
-                        deepath+=1
-                        if deepath>5:break
                     #if parent_of_caption == main_table:break
-                    label  = parent_of_caption.get('id') if parent_of_caption else None ## ==> S2.F2.10
+                    label  = get_id_else_to_its_parent(caption)
                     assert label is not None and len(label.strip())> 0, f"why this table {caption} has no label"
                 else:
                     logging.warning(f"the caption has not tag??? \n{pretty_view(caption)}")
@@ -761,9 +771,10 @@ def revert_the_block_equation_into_latex(soup:BeautifulSoup):
                 parent = parent.parent
                 deepth+=1
                 if deepth>10:break
-            label = parent.get('id',None)
-            assert label is not None and len(label.strip()) > 0, f"why this equation \n{(pretty_view(block_equation))} has no label"
-            primary_labels[label]   = tag_str
+            label = parent.get('id',None) if parent is not None else None
+            #assert label is not None and len(label.strip()) > 0, f"why this equation \n{(pretty_view(block_equation))} has no label"
+            if label:
+                primary_labels[label]   = tag_str
         
         # extra_table_label, extra_table_metadata = remove_tubler_and_labels(block_equation) #<--- lets remove the table in table no matter it is a math table
         # table_label = table_label|extra_table_label
@@ -788,7 +799,9 @@ def revert_the_block_equation_into_latex(soup:BeautifulSoup):
         else:
             #assert len(whole_maths_here) == 1, f"Why this element {block_equation.prettify()} has multiple maths??"
             math_latex = " ".join([get_latex_from_math(math) for math in whole_maths_here])
-            assert len(math_latex.strip())>0, f"why this element \n{pretty_view(block_equation)} has no maths??"
+            if len(math_latex.strip())==0 and whole_maths_here[0].text:
+                # See 2401/2401.07555.html <-- has an empty part
+                logging.warning(f"why this element \n{pretty_view(block_equation)} has no maths??")
             label_string = f"id={label}" if label else ""
             block_equation.replace_with(BeautifulSoup(f"""<p class="ltx_p" {label_string}>$$\n{math_latex}\n$$\n</p>""",'html.parser').p)   
         block_equation = soup.find(class_='ltx_equation')
@@ -1119,7 +1132,10 @@ def recovery_citation_in_sentense(cite: BeautifulSoup, labels_reference: Dict[st
                 ref.replace_with(ref.text.strip())
             elif 'ltx_missing_citation' in ref.get('class',[]): # see /0505/cond-mat0505601.html
                 ref.decompose() 
+            elif ref.get('class')==['ltx_ref']:
+                ref.decompose() 
             else:
+        
                 raise NotImplementedError(f"Please check why this ref has no href:\n{ref}")
             
     refs = [ref for ref in refs if ref not in refs_that_wont_recovery]
@@ -1189,7 +1205,9 @@ def recovery_ref_in_sentense(ref: BeautifulSoup, labels_reference: Dict[str, str
     if len(reflabels) > 1:
         reflabels = [[a,b] for a,b in reflabels if a not in ['Ref']]  ## The Ref from ltx_tag_ref which is quite normal and cause problem see 1511/1511.06005.html
     if len(reflabels) > 1:
-        raise NotImplementedError(f'multiple label detected for {ref_key} => {reflabels}, we will use the first one')
+        ref_order = {'Reference':0, 'Equation':1, 'Figure':2, 'Table':3, 'Section':4, 'Item':5}
+        reflabels = sorted(reflabels,key=lambda x: ref_order.get(x[0],6))
+        logging.warning(f'multiple label detected for {ref_key} => {reflabels}, we will use the first one: => {reflabels[0]}')
     
     ref_type, label = reflabels[0]
     next_string = ref.next_sibling 

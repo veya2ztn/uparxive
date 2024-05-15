@@ -253,6 +253,64 @@ def comment_out_preamble_block(content, excluded_commands=None, reverse_mode=Fal
 
     return '\n'.join(elements)
 
+
+def filter_out_preamble_block(content, included_commands=None):
+    # Initialize variables
+    brace_counts = {'curly': 0, 'square': 0, 'round': 0}
+    
+    commented_content = []
+    
+    # Helper function to check if all braces are balanced
+    def braces_balanced(brace_counts):
+        return all(count == 0 for count in brace_counts.values())
+
+    # Define commands to exclude from commenting
+    
+    
+    lines = [line.strip() for line in content.splitlines(True) if  line.strip()]
+
+    elements =[]
+    preamble_block=[]
+    element  =""
+    in_command = False
+    for i in range(len(lines)):
+        line = lines[i]  # Keep linebreaks
+        if line.strip().startswith('%'):
+            element += line+"\n"
+            continue
+        
+        if not in_command:
+            if any(line.lstrip().startswith(cmd) for cmd in included_commands):
+                in_command = "should_comment"
+            else:
+                in_command = "donot_comment"
+
+        # If we are inside an excluded command, count braces
+        if in_command:
+            brace_counts['curly']  += line.count('{') - line.count('}')
+            brace_counts['square'] += line.count('[') - line.count(']')
+            brace_counts['round']  += line.count('(') - line.count(')')
+
+            # If all braces are balanced, the command has ended
+            is_commandQ = braces_balanced(brace_counts) and (i==len(lines)-1 or lines[i+1].strip()[0]=='\\')
+            if is_commandQ:
+                in_command = f"end_of_comment.{in_command}"
+        #print(brace_counts)
+        # Add line to commented_content
+        element += line
+
+        if in_command.startswith("end_of_comment"):
+            COMMENTQ=not in_command.endswith('donot_comment')
+            
+            if COMMENTQ:
+                preamble_block.append(element)
+            else:
+                elements.append(element)
+            element=""
+            in_command = False
+
+    return '\n'.join(elements), "\n".join(preamble_block)
+
 def remove_line_via_comment(match):
     return f"% {match.group(0)}" 
 
@@ -294,7 +352,7 @@ def deal_with_the_documentclass(content,mode,blacklisted_packages=None,ForceQ= F
     content = re.sub(r'\\begin{opening}', remove_line_via_comment, content)
     content = re.sub(r'\\end{opening}', remove_line_via_comment, content)
     return content
-
+ 
 #############################################
 #################### main ###################
 #############################################

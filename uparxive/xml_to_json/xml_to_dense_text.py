@@ -17,15 +17,19 @@ from tqdm.auto import tqdm
 from typing import List, Dict,Tuple
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+
+
 ### set the loger in warning mode
 log_level = os.environ.get('LOG_LEVEL', 'WARN')
+import logging
+
 #logging.basicConfig(level=log_level, format='Paper ID: %(paper_id)s - %(message)s')
 logging.basicConfig(level=log_level, format='%(message)s')
 import traceback
 enable_checkCiteDontHaveBibRef = False
-enable_checkTooManyNote= True
+enable_checkTooManyNote= False
 
-
+global_versbose=False
 @dataclass
 class XMLtoJsonConfig(BatchModeConfig):
     task_name = 'xml_to_json'
@@ -35,21 +39,21 @@ class XMLtoJsonConfig(BatchModeConfig):
     use_origin_ref_number : bool = False
     verbose: bool = False
     use_plain_citation:bool = False
-
+    do_not_generate_reference:bool = False
 def checkCiteDontHaveBibRef(string):
     if enable_checkCiteDontHaveBibRef:
-        logging.info(string)
+        if global_versbose:logging.info(string)
         raise CiteDontHaveBibRefError
     else:
-        logging.info(string)
+        if global_versbose:logging.info(string)
         return 
 
 def checkTooManyNote(string):
     if enable_checkTooManyNote:
-        logging.info(string)
+        if global_versbose:logging.warning(string)
         raise TooManyNoteError
     else:
-        logging.info(string)
+        if global_versbose:logging.info(string)
         return 
 
 def remove_and_collect(soup: BeautifulSoup, name):
@@ -61,9 +65,13 @@ def remove_and_collect(soup: BeautifulSoup, name):
         return obj
 
 def get_latex_from_math(math:BeautifulSoup):
+    if not math: return None
+    if math.attrs is None:return None
     latex = math.get('tex')
+    
     if not latex:
-        logging.warning(f"it seem we find a nothing math at \n {math}")
+        if global_versbose:logging.warning(f"it seem we find a nothing math at \n {math}")
+        return None
     return better_latex_math_code(latex)
 
 def is_inline_math(tag):
@@ -71,11 +79,19 @@ def is_inline_math(tag):
 
 def revert_all_the_inline_math_to_latex(soup:BeautifulSoup):
     for math in soup.find_all(is_inline_math):
-        math.replace_with(f" ${get_latex_from_math(math)}$ ")
+        latex = get_latex_from_math(math)
+        if latex:
+            math.replace_with(f" ${latex}$ ")
+        else:
+            math.decompose()
 
 def revert_all_the_math_to_latex(soup:BeautifulSoup):
     for math in soup.find_all('Math'):
-        math.replace_with(f" ${get_latex_from_math(math)}$ ")
+        latex = get_latex_from_math(math)
+        if latex:
+            math.replace_with(f" ${latex}$ ")
+        else:
+            math.decompose()
 
 
 def discard_text_format_in_sentense(soup: BeautifulSoup, cleanmode=False):
@@ -98,12 +114,17 @@ def discard_text_format_in_sentense(soup: BeautifulSoup, cleanmode=False):
     for text in soup.find_all('text','emph'):
         if 'fontsize' not in text.attrs:
             pass
-            #logging.warning(f"it seem we find a none register special txt like \n {text.prettify()}")
+            #if global_versbose:logging.warning(f"it seem we find a none register special txt like \n {text.prettify()}")
         text.replace_with(*text.contents)
 
 def get_label_of_the_element(soup: BeautifulSoup):
-    return soup.get('key') or soup.get('labels') or soup.get('xml:id')
-
+    if soup is None:return None
+    if soup.attrs is None: return None
+    for key in ['key','labels','xml:id']:
+        if soup.get(key):
+            return soup.get(key)
+    return None
+    
 def get_id_else_to_its_parent(soup: BeautifulSoup, max_depth=5,return_father= False):
     parent = soup
     deepath=0
@@ -141,8 +162,9 @@ def identify_bibblock_is_note_or_citation(bibblock:BeautifulSoup, args)->Tuple[b
         
     for math_in_bib in bibblock.find_all('math'):
         latex = get_latex_from_math(math_in_bib)
-        if count_activate_latex_character(latex)>15:
-            logging.warning(latex + " is regard as note")
+        if latex is None:math_in_bib.decompose()
+        if latex and count_activate_latex_character(latex)>15:
+            if global_versbose:logging.warning(latex + " is regard as note")
             iscitationQ = False
             hardcitationQ = True
             reason = 'has_long_math'
@@ -176,16 +198,20 @@ def get_tag_string_from_tag_and_remove_it(tags:BeautifulSoup):
     alltags = [[order.get(tag.get('role',''), 3),tag] for tag in tags.find_all('tag')]
     if len(alltags) ==0:
         string = None
-    alltags.sort(key=lambda x:x[0])
-    string = alltags[0][1].text
+    else:
+        alltags.sort(key=lambda x:x[0])
+        string = alltags[0][1].text
     tags.decompose()
     return string
 
 def discard_note(soup: BeautifulSoup,filte_out_note:bool):
     note_ref_metadata = {}
     note_ref_labels   = {}
-    for note_id, note in enumerate(soup.find_all('note')):
+    notes = soup.find_all('note')
+    notes.reverse()
+    for note_id, note in enumerate(notes):
         #print(note)
+        #if not note:continue
         tags       = note.find('tags', recursive=False)
         count_label=f"Note_{note_id}"
         tag_label  = get_label_of_the_element(note) or count_label
@@ -222,7 +248,7 @@ def retrieve_all_cite(soup:BeautifulSoup):
                 if ref not in ref_count:ref_count[ref]=0
                 ref_count[ref]+=1
         else:
-            logging.info(f"this cite:\n{bibref.prettify()} \n wont have bibref????, we will remove it ")
+            if global_versbose:logging.info(f"this cite:\n{bibref.prettify()} \n wont have bibref????, we will remove it ")
             bibref.decompose()
             continue
     for singleref in soup.find_all('ref'):
@@ -235,7 +261,7 @@ def retrieve_all_cite(soup:BeautifulSoup):
                 if ref not in ref_count:ref_count[ref]=0
                 ref_count[ref]+=1
         else:
-            logging.info(f"this cite:\n{singleref.prettify()} \n wont have bibref????, we will remove it ")
+            if global_versbose:logging.info(f"this cite:\n{singleref.prettify()} \n wont have bibref????, we will remove it ")
             #singleref.decompose()
             continue
     return ref_count
@@ -273,19 +299,26 @@ def parse_bibitem(bibitem: BeautifulSoup,
     filte_out_note = not args.passNote
     verbose        = args.verbose
     tags           = bibitem.find('tags', recursive=False)
-    
     if tags is None:
-        if len(refcount)>0: logging.warning(f"WARNING: the bibitem {bibitem.prettify()} has no tag")
+        if len(refcount)>0: 
+            if global_versbose:logging.warning(f"WARNING: the bibitem {bibitem.prettify()} has no tag")
         return ### 
     tag_count = f"ref_{bibindex}"
     tag_of_bib   = get_tag_string_from_tag_and_remove_it(tags) or tag_count
     label_of_bib = get_label_of_the_element(bibitem) or tag_of_bib
     if not label_of_bib:
-        logging.info(f" this bibitem={bibitem} dont have label ???? ")
+        if global_versbose:logging.info(f" this bibitem={bibitem} dont have label ???? ")
         return
     if tags is not None:
         # remove the tag now
         tags.decompose()
+    # tag_count    = f"ref_{bibindex}"
+    # tag_of_bib   = get_tag_string_from_tag_and_remove_it(bibitem) or tag_count
+    # label_of_bib = get_label_of_the_element(bibitem) or tag_of_bib
+    # if not label_of_bib:
+    #     if global_versbose:logging.info(f" this bibitem={bibitem} dont have label ???? ")
+    #     return
+    
     
     #### now we will analysis whether the content of the bib is a note or citation
     #print(bibitem)
@@ -308,7 +341,7 @@ def parse_bibitem(bibitem: BeautifulSoup,
             iscitationQ = not should_the_string_be_regard_as_note(bibstring)
             if not iscitationQ:reason = 'content analysis'
             if verbose and not iscitationQ:
-                logging.info(f'{bibblocks} is regard as note via [string judge]')
+                if global_versbose:logging.info(f'{bibblocks} is regard as note via [string judge]')
         
     if not iscitationQ:
         ## then, this block is a note, should save whole xml code in this block and put them into main content
@@ -319,20 +352,65 @@ def parse_bibitem(bibitem: BeautifulSoup,
         bibitem_ref_labels[label_of_bib]  = tag_of_bib
         bibitem_ref_metadata[label_of_bib]=bibstring
 
+def parse_bibentry(bibitem: BeautifulSoup, 
+                    bibindex:int, 
+                    note_ref_labels:Dict[str, str], 
+                    note_ref_metadata:Dict[str, str], 
+                    bibitem_ref_labels:Dict[str, str], 
+                    bibitem_ref_metadata:Dict[str, str], 
+                    refcount: Dict[str, int],
+                    args:XMLtoJsonConfig):
+    """
+    Usually caused by directly write .bib format in .tex file. For example, arxiv: 1004.4054
+    """
+
+    ### first, find the ref id
+    tag_count    = f"ref_{bibindex}"
+    tag_of_bib   = obtain_tag_of_one_element(bibitem) or tag_count
+    label_of_bib = get_label_of_the_element(bibitem) or tag_of_bib
+    if label_of_bib is None or len(label_of_bib.strip())==0:
+        if global_versbose:logging.info(f" this bibitem={bibitem} dont have label ???? ")
+        return
+    ### if we use this, it must be a citation
+    bib_origin = bibitem.find('bib-data',role='self')
+    if bib_origin: bib_origin.decompose()
+
+
+    bibstring = better_latex_sentense_string(bibitem.text)
+    # bibstring = []
+    # for child in bibitem:
+    #     bibstring.append(better_latex_sentense_string(" ".join(child.itertext())))
+    # bibstring = ", ".join(bibstring)
+    bibitem_ref_labels[label_of_bib]= tag_of_bib
+    bibitem_ref_metadata[label_of_bib]=bibstring
+
+
 def remove_entire_bibliography_and_build_labels(soup: BeautifulSoup , refcount: Dict[str, int],args):
 
     bibitem_ref_labels = {}
     bibitem_ref_metadata = {}
     note_ref_labels = {}
     note_ref_metadata={}
+    bibindex = 0
     for bio_element in soup.find_all('bibliography'):
         for bio_ul in bio_element.find_all('biblist'):
-            for bibindex, bio_li in enumerate(bio_ul.find_all('bibitem')):
+            for bio_li in bio_ul.find_all('bibitem'):
                 parse_bibitem(bio_li,bibindex,note_ref_labels,note_ref_metadata, bibitem_ref_labels,bibitem_ref_metadata,refcount,args)
-            for bibindex, bio_li in enumerate(bio_ul.find_all('bibentry')):
+                bibindex+=1
+            for bio_li in bio_ul.find_all('bibentry'): #0705/0705.2784
                 parse_bibentry(bio_li,bibindex,note_ref_labels,note_ref_metadata, bibitem_ref_labels,bibitem_ref_metadata,refcount,args)
+                bibindex+=1
         bio_element.decompose()
     return soup, bibitem_ref_labels, bibitem_ref_metadata, note_ref_labels, note_ref_metadata
+
+def extract_bibblock_html_soup(bibblockli:BeautifulSoup):
+    bibblocks = bibblockli.find_all('bibblock')
+    # Combine the contents of the bibblocks into a single <span class="ltx_bibblock"> element
+    merged_content = []
+    for bibblock in bibblocks:
+        merged_content.append(" ".join([str(t).strip() for t in bibblock.contents]))
+    merged_html = BeautifulSoup(f"""<p>(Note: {' '.join(merged_content)} )</p>""", 'xml')
+    return merged_html
 
 def put_note_string_back_into_each_sentence(soup: BeautifulSoup, 
                                             ref_count: Dict[str, int], 
@@ -344,20 +422,22 @@ def put_note_string_back_into_each_sentence(soup: BeautifulSoup,
     put_back_keys  = set()
     for cite in soup.find_all('cite'):
         all_refs_of_one_cite = cite.find_all('ref')
-        put_ref_backQ = False
+        refs = []
         for bibref in all_refs_of_one_cite:
-            ref = bibref.get('bibrefs', "").strip().split()
-            put_ref_backQ = False
-            
+            refs.extend(bibref.get('bibrefs', "").strip().split())
+        put_ref_backQ = False
+        for ref in refs:
+            ref = ref.strip()
             if ref in note_ref_metadata:
                 put_ref_backQ = True
                 hardcitationQ, bibblock, reason = note_ref_metadata[ref]
                 if ref_count[ref]>2 and (not hardcitationQ) and not always_put_back_note:
-                    logging.info(f"key {ref} skip, dual to many counts and its not a hardcitation")
+                    if global_versbose:logging.info(f"key {ref} skip, dual to many counts and its not a hardcitation")
                     continue # only when it is not type math and ref > 1 case, we dont insect note into contextf    
                 #assert len(texts) == 1, f"Only single citation replacement is supported per cite element.{ref} appear more than once"
                 put_back_keys = put_back_keys|set([ref])
-                logging.warning(f"put back {ref} due to {reason}")
+                if global_versbose:logging.warning(f"put back {ref} due to {reason}")
+                raise
                 cite.insert_before(extract_bibblock_html_soup(copy.deepcopy(bibblock)))
                 bibref.decompose()
         if put_ref_backQ and len(cite.find_all('bibref'))==0:
@@ -434,15 +514,17 @@ def remove_figures_record_the_labels(soup: BeautifulSoup):
     return primary_labels, primary_metadata,primary_source
 
 def tabular_into_markdown(soup:BeautifulSoup):
-    def is_regard_as_table(tag):
-        return tag.name in set(['table', 'tbody', 'tabular'])
+    
     revert_all_the_math_to_latex(soup)
+    def is_regard_as_table(tag):
+        return tag.name in set(['tbody', 'tabular'])
     tables = soup.find_all(is_regard_as_table)
     tables.reverse()
     markdown_outputs = []
     for table in tables:
-
+        if not table:continue
         rows = table.find_all('tr')
+        if len(rows)==0:continue
         markdown_table = []
     
         # Process each row
@@ -457,6 +539,8 @@ def tabular_into_markdown(soup:BeautifulSoup):
         # Build the Markdown table
         markdown_output = ""
         headers = markdown_table[0]
+        
+        
         alignment_row = ["---"] * len(headers)
         
         # Create the header row
@@ -472,7 +556,8 @@ def tabular_into_markdown(soup:BeautifulSoup):
             row = "| " + " | ".join(data_row) + " |"
             markdown_output += row + "\n"    
         markdown_outputs.append(markdown_output)
-    return markdown_output
+        table.decompose()
+    return "\n\n".join(markdown_outputs)
 
 def remove_tables_record_the_labels(soup: BeautifulSoup):
     """
@@ -561,8 +646,8 @@ def remove_tables_record_the_labels(soup: BeautifulSoup):
                 primary_labels[tag_label] = tag_ref
                 primary_metadata[tag_label] = copy.deepcopy(caption)
         ### ------------------- next, we collect the resource collect from this image
-        
         markdown_input  = tabular_into_markdown(table)
+        
         primary_source[tag_label] = markdown_input
         markdown_element= BeautifulSoup(f"<para><p>\n![Table:{tag_label}]\n<\p><\para>",features='xml')
         table.replace_with(markdown_element)
@@ -576,57 +661,61 @@ def remove_floats_record_the_labels(soup: BeautifulSoup):
     ## find whole the figures that has nest caption
     primary_labels = {}
     primary_metadata = {}
-
-    float  = soup.find('float')
+    primary_source  = {}
+    float_obj  = soup.find('float')
     counter = LoopCounter(len(soup.find_all('float'))+10)
-    while counter.increment() and  float is not None:
-        raise NotImplementedError
-        #print("="*20+"\n"+float.prettify()+"\n"+"="*20)
-        captions   = float.find_all('caption') 
+    while counter.increment() and  float_obj is not None:
+
+        captions   = float_obj.find_all('caption') 
         count_label = f"Figure_{len(primary_labels)}"
-        tag_label   = float.get('xml:id',count_label)
-        tag_ref     = obtain_tag_of_one_element(float) or count_label
+        tag_label   = get_label_of_the_element(float_obj) or count_label
+        tag_ref     = obtain_tag_of_one_element(float_obj) or count_label
         if len(captions) == 0: ### no caption, lets just check the tags
-            primary_labels[tag_label] = tag_ref
-            primary_metadata[tag_label] = float.text
+            primary_labels[tag_label]   = tag_ref
+            primary_metadata[tag_label] = float_obj.text
             
         elif len(captions) == 1:
-            primary_labels[tag_label] = tag_ref
+            primary_labels[tag_label]   = tag_ref
             primary_metadata[tag_label] = copy.deepcopy(captions[0])
             
         else:# len(captions) > 1:
             for caption in captions:
-                count_label = f"Table_{len(primary_labels)}" 
+                count_label = f"Float_{len(primary_labels)}" 
                 tag_label   = get_id_else_to_its_parent(caption) or count_label
-                tag_ref     = obtain_tag_of_one_element(float) or count_label ### <--- usually there only has one tag under a caption.
+                tag_ref     = obtain_tag_of_one_element(float_obj) or count_label ### <--- usually there only has one tag under a caption.
                 primary_labels[tag_label] = tag_ref
                 primary_metadata[tag_label] = copy.deepcopy(caption)
         ### ------------------- next, we collect the resource collect from this image
         
-        # markdown_input = []
-        # for graphic in float.find_all('graphics'):
-        #     source = graphic.get('graphic')
-        #     sourceid=graphic.get('xml:id','float')
-        #     if source:
-        #         markdown_input.append(f"![{sourceid}]({source})")
-        #markdown_input  = "\n".join(markdown_input)
-        markdown_input = "=] Here is a float. ![="
-        markdown_element= BeautifulSoup(f"<p>\n{markdown_input}\n<p>",features='xml')
-        float.replace_with(markdown_element)
-        float  = soup.find('float')
-    return primary_labels, primary_metadata
+        markdown_input  = float_obj.text
+        primary_source[tag_label] = markdown_input
+        markdown_element= BeautifulSoup(f"<para><p>\n![Floats:{tag_label}]\n<\p><\para>",features='xml')
+        float_obj.replace_with(markdown_element)
+        float_obj  = soup.find('float')
+    return primary_labels, primary_metadata, primary_source
 
 def revert_the_block_equation_into_latex(soup,primary_labels,replace_mode=False):
-    equations         = soup.find_all('equation')
-    equation_all_lines= ""
-    
-    if len(equations) > 0: 
-        equation_all_lines = []
-        for equation in equations:
-            equation_this_line = revert_single_equation_into_latex(equation, primary_labels,replace_mode=replace_mode)
-            equation_all_lines.append(equation_this_line.strip().strip("$").strip())
+    # equations  = soup.find_all('equation')
+    # equation_all_lines= []
+    # if len(equations) > 0: 
+    #     equation_all_lines = []
+    #     for equation in equations:
+    #         equation_this_line = revert_single_equation_into_latex(equation, primary_labels,replace_mode=replace_mode)
+    #         equation_all_lines.append(equation_this_line.strip().strip("$").strip())
+
+    equation_all_lines = []
+    equation = soup.find('equation')
+    counter = LoopCounter(max_iterations=len(soup.find_all('equation'))+10)
+    while counter.increment() and  equation is not None:
+        equation_this_line = revert_single_equation_into_latex(equation, primary_labels,replace_mode=replace_mode)
+        equation_all_lines.append(equation_this_line.strip().strip("$").strip())
+        equation = soup.find('equation')
+            
+    if len(equation_all_lines)>0:
         equation_all_lines = " \\\\ \n".join(equation_all_lines)
         equation_all_lines = f"\n$$\n{equation_all_lines.strip()}\n$$\n"
+    else:
+        equation_all_lines = None
     return equation_all_lines
 
 def revert_the_block_equationgroup_into_latex(soup:BeautifulSoup):
@@ -645,19 +734,31 @@ def revert_the_block_equationgroup_into_latex(soup:BeautifulSoup):
         tag_ref     = obtain_tag_of_one_element(equationgroup) or count_label
         primary_labels[tag_label] = tag_ref
         mathlatex = revert_the_block_equation_into_latex(equationgroup,primary_labels)
-        newtag  = BeautifulSoup(f"<equation><directlymath> {mathlatex} </directlymath></equation>",features='xml')
-        equationgroup.replace_with(newtag)
+        if mathlatex:
+            newtag  = BeautifulSoup(f"<equation><directlymath> {mathlatex} </directlymath></equation>",features='xml')
+            equationgroup.replace_with(newtag)
+        else:
+            if global_versbose:logging.warning(f"this equationgroup is empty??\n{equationgroup}")
+            equationgroup.replace_with(equationgroup.text)
     return primary_labels
+ 
+def revert_single_equation_into_latex(equation:BeautifulSoup, primary_labels, replace_mode=False, in_equation=False):
+    if equation.find('equation') is not None:
+        if global_versbose:logging.warning("equation in equation? it usually means that subequation is wrappered and we wont use it")
+        for subequation in equation.find_all('equation'):
+            if subequation:subequation.decompose()
+        #revert_single_equation_into_latex(equation.find('equation'), primary_labels, replace_mode=False, in_equation=True)
 
-def revert_single_equation_into_latex(equation:BeautifulSoup, primary_labels, replace_mode=False):
-    assert equation.find('equation') is None, "equation in equation?"
     directlymath = equation.find('directlymath')
     if directlymath:
         if replace_mode:
             directlymath = BeautifulSoup(f"<para><p>{directlymath.text} </p></para>",features='xml')
             equation.replace_with(directlymath)
-            print(directlymath)
-        return directlymath.text
+            #print(directlymath)
+        ### this mean the equation is already under a equationgroup and will reuse the text 
+        text = directlymath.text
+        equation.decompose()
+        return text
     count_label = f"Equ_{len(primary_labels)}"
     tag_label   =  get_label_of_the_element(equation) or count_label
     tag_ref     = obtain_tag_of_one_element(equation) or count_label
@@ -681,8 +782,14 @@ def revert_single_equation_into_latex(equation:BeautifulSoup, primary_labels, re
         #math.replace_with()
         whole_math.append(math_latex)
     
-    whole_math_latex = " ".join(whole_math)
-    whole_math_latex = f"\n$$\n{whole_math_latex.strip()}\n$$\n"
+    whole_math_latex = "\n".join(whole_math)
+    # if equation.find('equation'):
+    #     print(whole_math_latex)
+    #     print("===================")
+    if in_equation:
+        whole_math_latex = f"\n{whole_math_latex.strip()}\n"
+    else:
+        whole_math_latex = f"\n$$\n{whole_math_latex.strip()}\n$$\n"
     whole_math_latex_element = whole_math_latex
     if replace_mode:
         whole_math_latex_element = BeautifulSoup(f"<para><p>{whole_math_latex} </p></para>",features='xml')
@@ -701,10 +808,10 @@ def check_no_figure_and_table_left(soup:BeautifulSoup):
         if len(remain_figure.text.strip())==0:
             remain_figure.decompose()
         else:
-            logging.info(f"There are still figure left, seem a plain table, we store it")
+            if global_versbose:logging.info(f"There are still figure left, seem a plain table, we store it")
             key = label = f'extra_figure_{len(extra_figure_label)}'
             extra_figure_label[key] = label
-            extra_figure_metadata[key]={}
+            extra_figure_metadata[key]=""
             extra_figure_source[key]= figure_to_markdown(copy.deepcopy(remain_figure))
             markdown_element= BeautifulSoup(f"<para><p>\n![Figure:{key}]\n</p></para>",features='xml')
             remain_figure.replace_with(markdown_element)
@@ -722,10 +829,10 @@ def check_no_figure_and_table_left(soup:BeautifulSoup):
             revert_all_the_math_to_latex(remain_table)
             raise NotImplementedError(f"why there are still table left, what left now is \n{remain_table}")
         else:
-            logging.info(f"There are still table left, seem a plain table, we store it")
+            if global_versbose:logging.info(f"There are still table left, seem a plain table, we store it")
             key = label = f'extra_table_{len(extra_table_label)}'
             extra_table_label[key]     = label
-            extra_table_metadata[key]  = {}
+            extra_table_metadata[key]  = ""
             extra_table_source[key]    = tabular_into_markdown(copy.deepcopy(remain_table))
             markdown_element= BeautifulSoup(f"<para><p>\n![Table:{key}]\n</p></para>",features='xml')
             remain_table.replace_with(markdown_element)
@@ -733,7 +840,7 @@ def check_no_figure_and_table_left(soup:BeautifulSoup):
     # paper like quant-ph0003093.html will list the caption information in a table at the end of main content.
     # since it doesnt have any ref in code, we just delete the table directly
     # if len(soup.find_all('table'))>0:
-    #     logging.warning(f"there are still table left, we just remove them ====] ")
+    #     if global_versbose:logging.warning(f"there are still table left, we just remove them ====] ")
     #     for table in soup.find_all('table'):
     #         if table:table.decompose()
     #assert len(soup.find_all('table'))==0, "why there are still table left"
@@ -745,9 +852,9 @@ def collect_tags_and_record_all_labels(soup: BeautifulSoup):
     otherslabels={}
     for tags in soup.find_all('tags'):
         parent      = tags.find_parent()
-        tags_string = get_tag_string_from_tag_and_remove_it(tags)
+        tags_string        = get_tag_string_from_tag_and_remove_it(tags)
         tag_label,parent   = get_id_else_to_its_parent(parent,return_father= True)
-        label_type  = parent.name.lower().capitalize()
+        label_type         = parent.name.lower().capitalize() if parent else "Other"
         
         if tag_label:
             if label_type not in otherslabels:otherslabels[label_type]={}
@@ -757,7 +864,7 @@ def collect_tags_and_record_all_labels(soup: BeautifulSoup):
         parent      = tag.find_parent()
         tags_string = tag.text
         tag_label,parent   = get_id_else_to_its_parent(parent,return_father= True)
-        label_type  = parent.name.lower().capitalize()
+        label_type  = parent.name.lower().capitalize() if parent else "Other"
         
         if tag_label:
             if label_type not in otherslabels:otherslabels[label_type]={}
@@ -768,7 +875,7 @@ def collect_tags_and_record_all_labels(soup: BeautifulSoup):
 def recovery_citation_in_sentense(cite: BeautifulSoup, labels_reference: Dict[str, str], paper_id: str, refs_that_wont_recovery=[],config:XMLtoJsonConfig=None):
     bibref = cite.find('bibref')
     if bibref is None:
-        checkCiteDontHaveBibRef(f""" cite of  {cite.prettfy()}  dont have bibref??? """)
+        checkCiteDontHaveBibRef(f""" cite of  {cite.prettify()}  dont have bibref??? """)
         cite.decompose()
         return 
     text = bibref.get('bibrefs')
@@ -779,8 +886,12 @@ def recovery_citation_in_sentense(cite: BeautifulSoup, labels_reference: Dict[st
         reflabels = labels_reference[ref]
 
         if len(reflabels)>1:
-            logging.warning(f"multiple label detected: {reflabels}, we will use the first one")
-            raise
+            ## 0705.0082/0705.0082.revtex.xml
+            # ref_order: Reference -> Equation -> Figure -> Table -> Section
+            ref_order = {'Reference':0, 'Equation':1, 'Figure':2, 'Table':3, 'Section':4}
+            reflabels = sorted(reflabels,key=lambda x: ref_order.get(x[0],6))
+            if global_versbose:logging.warning(f"multiple label detected: {ref} ==> {reflabels}, we will use the first one => {reflabels[0]}")
+            #raise
         ref_type, label = reflabels[0]
         label_list.append(label)
             
@@ -831,7 +942,7 @@ def recovery_ref_in_sentense(ref: BeautifulSoup, labels_reference: Dict[str, str
             if ref['idref']:return ref.decompose()
             if len(set(ref.get('class',[]))&set(['ltx_url','ltx_href','ltx_nolink']))>0:return ref.decompose()
             if len(ref.text).strip() == 0: return ref.decompose()
-            logging.warning(f"""ref of element dont have ref??? See {ref.prettify()} """ )
+            if global_versbose:logging.warning(f"""ref of element dont have ref??? See {ref.prettify()} """ )
             raise 
         else:
             labelref = " ".join(ref.text)
@@ -844,12 +955,12 @@ def recovery_ref_in_sentense(ref: BeautifulSoup, labels_reference: Dict[str, str
             try:
                 reflabels = labels_reference[labelref]
             except KeyError:
-                logging.info(f"we want to use key = {labelref}, but the collect labels pool only have ")
+                if global_versbose:logging.info(f"we want to use key = {labelref}, but the collect labels pool only have ")
                 for key,val in labels_reference.items():
-                    logging.info(f"{key} ] {val}")
+                    if global_versbose:logging.info(f"{key} ] {val}")
                 raise
             if len(reflabels)>1:
-                logging.info(f'multiple label detected for {labelref} => {reflabels}, we will use the first one')
+                if global_versbose:logging.info(f'multiple label detected for {labelref} => {reflabels}, we will use the first one')
             ref_type, label_now = reflabels[0]
             labels.append(str(label_now))
         label = ",".join(labels)
@@ -886,16 +997,38 @@ def recovery_whole_citation_complete(soup: BeautifulSoup,whole_ref_to_labels, pa
         ## the for loop will get failed when continues <cite> tag such as 
         <cite class="ltx_cite ltx_citemacro_cite">[<a href="#bib.bib1" title="" class="ltx_ref">1</a>]</cite><cite class="ltx_cite ltx_citemacro_cite">[<a href="#bib.bib2" title="" class="ltx_ref">2</a>]</cite><cite class="ltx_cite ltx_citemacro_cite">[<a href="#bib.bib3" title="" class="ltx_ref">3</a>]</cite>.
     """
-    cites = soup.find_all('cite')
-    cites.reverse()
-    for cite in cites:
+
+    # cites = soup.find_all('cite')
+    # while len(cites)>0:
+    #     cite = cites.pop(-1)
+    #     if not cite:continue
+    #     try:
+    #         recovery_citation_in_sentense(cite, whole_ref_to_labels, paper_id,refs_that_wont_recovery=refs_that_wont_recovery, config = config)
+    #         if cite:cite.decompose()
+    #     except:
+    #         cites = soup.find_all('cite')
+
+    cite = soup.find('cite')
+    counter = LoopCounter(max_iterations=len(soup.find_all('cite'))+10)
+    while counter.increment() and  cite is not None:
         recovery_citation_in_sentense(cite, whole_ref_to_labels, paper_id,refs_that_wont_recovery=refs_that_wont_recovery, config = config)
+        cite = soup.find('cite')
 
-    refs = soup.find_all('ref')
-    refs.reverse()
-    for ref in refs:
+    # refs = soup.find_all('ref')
+    # while len(refs)>0:
+    #     ref = refs.pop(-1)
+    #     if not ref:continue
+    #     try:
+    #         recovery_ref_in_sentense(ref, whole_ref_to_labels, paper_id,refs_that_wont_recovery=refs_that_wont_recovery, config = config)
+    #         if ref:ref.decompose()
+    #     except:
+    #         refs = soup.find_all('ref')
+
+    ref = soup.find('ref')
+    counter = LoopCounter(max_iterations=len(soup.find_all('ref'))+10)
+    while counter.increment() and  ref is not None :
         recovery_ref_in_sentense(ref, whole_ref_to_labels, paper_id,refs_that_wont_recovery=refs_that_wont_recovery, config = config)
-
+        ref = soup.find('ref')
 
 def beautify_sentence(soup: BeautifulSoup):
     for p in soup.find_all('p'):
@@ -910,9 +1043,15 @@ def beautify_sentence(soup: BeautifulSoup):
 
 def deal_with_itermize(soup):
     for ul in soup.find_all('itemize'):
-        raise NotImplementedError
-        for li in ul.find_all('li'):
-            li.replace_with("- "+f"{better_latex_sentense_string(li.text)}")
+        the_list = []
+        for li in ul.find_all('item'):
+            one_row = []
+            for p in li.find_all('p'):
+                one_row.append("- "+f"{better_latex_sentense_string(p.text)}")
+            one_row = "\n".join(one_row)
+            the_list.append(one_row)
+        the_list = "\n".join(the_list)
+        ul.replace_with(the_list)
 
 def cleanup_html(soup: BeautifulSoup, whole_ref_to_labels,paper_id,refs_that_wont_recovery=[]):
     revert_the_block_equationgroup_into_latex(soup)
@@ -927,6 +1066,8 @@ def cleanup_html(soup: BeautifulSoup, whole_ref_to_labels,paper_id,refs_that_won
     #tree = replace_item_block_with_markdown_format(tree)
 
 def cleanup_reference_string(soup: BeautifulSoup, whole_ref_to_labels,paper_id, refs_that_wont_recovery, config:XMLtoJsonConfig=None):
+    if isinstance(soup, str):
+        soup = BeautifulSoup(f"<p>{soup}<\p>", 'xml')
     for tags in soup.find_all('tags'):
         tags.decompose()
     for tag in soup.find_all('tag'):
@@ -1106,9 +1247,9 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
     new_soup,reference_labels,bibitem_ref_metadata,note_ref_labels, note_ref_metadata= remove_entire_bibliography_and_build_labels(new_soup,ref_count, args)
     if len(note_ref_metadata)>5:
         for key,val in note_ref_metadata.items():
-            logging.info(f"{key} ] [ {better_latex_sentense_string(' '.join(val[1].text))} ]")
+            if global_versbose:logging.info(f"{key} ] [ {better_latex_sentense_string(' '.join(val[1].text))} ]")
         checkTooManyNote(f'the note_ref_metadata num={len(note_ref_metadata) } is too much , please check the file {tmp_xml_path}')
-        logging.warning('WARNING:Too Many note, we roll back to no note mode')
+        if global_versbose:logging.warning('WARNING:Too Many note, we roll back to no note mode')
         args.passNote = True
         soup,reference_labels,bibitem_ref_metadata,note_ref_labels, note_ref_metadata= remove_entire_bibliography_and_build_labels(soup,ref_count,args)
     else:
@@ -1131,7 +1272,7 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
     
     figures_labels, figures_metadata,figures_source = remove_figures_record_the_labels(soup)
     tables_labels ,  tables_metadata, tables_source = remove_tables_record_the_labels(soup)
-    floats_labels, floats_metadata   = remove_floats_record_the_labels(soup)
+    floats_labels, floats_metadata,floats_source   = remove_floats_record_the_labels(soup)
     equation_labels =revert_the_block_equationgroup_into_latex(soup)
     _=revert_the_block_equation_into_latex(soup,equation_labels,replace_mode=True)
 
@@ -1194,21 +1335,20 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
 
     lack_ref = list(set(ref_count) - (set(all_reference_keys)|set(whole_ref_to_labels)))
     if len(lack_ref)>0:
-        logging.info(f'you have {len(lack_ref)} ref lacks, such as {lack_ref[:4]}, please check the file {tmp_html_path}')
+        if global_versbose:logging.info(f'you have {len(lack_ref)} ref lacks, such as {lack_ref[:4]}, please check the file {tmp_html_path}')
         raise MisMatchRefError
     
     ## now, the left note metadata is those string looks like a citation, and we will put them back into the bibitem information
     for remain_key, remain_val in note_ref_metadata.items():
-        
         reference_labels[remain_key]=note_ref_labels[remain_key]
-        string = cleanup_reference_string(remain_val[1], whole_ref_to_labels,paper_id, refs_that_wont_recovery=put_back_keys,config=args)
-        bibitem_ref_metadata[remain_key]=better_latex_sentense_string(string)
-
-    
     whole_ref_to_labels = collect_whole_reference(in_content_ref_labels|
                                                   {'Reference':reference_labels,'Missing':missing_citation_labels}|
                                                   labels, 
                                                   use_count_type_ref=use_count_type_ref)
+    
+
+    
+    
 
     #cleanup_html(soup, whole_ref_to_labels,paper_id,refs_that_wont_recovery=[])
     recovery_whole_citation_complete(soup,whole_ref_to_labels, paper_id,refs_that_wont_recovery=[],config=args)
@@ -1217,10 +1357,14 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
     beautify_sentence(soup)
     deal_with_itermize(soup)
 
+    for remain_key, remain_val in note_ref_metadata.items():
+        string = cleanup_reference_string(remain_val[1], whole_ref_to_labels,paper_id, refs_that_wont_recovery=put_back_keys,config=args)
+        bibitem_ref_metadata[remain_key]=better_latex_sentense_string(string)
+
     for remain_key, remain_val in note_ref_metadata_not_in_context.items():
-            string = cleanup_reference_string(remain_val[1], whole_ref_to_labels,paper_id, refs_that_wont_recovery=put_back_keys,config=args)
-            note_ref_metadata_not_in_context[remain_key]=better_latex_sentense_string(string)
-            ## do this again since we modify the bibitem_ref_metadata
+        string = cleanup_reference_string(remain_val[1], whole_ref_to_labels,paper_id, refs_that_wont_recovery=put_back_keys,config=args)
+        note_ref_metadata_not_in_context[remain_key]=better_latex_sentense_string(string)
+        ## do this again since we modify the bibitem_ref_metadata
     
     for metadatapool in [figures_metadata, tables_metadata, floats_metadata]:
         for remain_key, remain_val in metadatapool.items():
@@ -1233,6 +1377,7 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
                       'floats_metadata':floats_metadata,
                       'tables_source':tables_source,
                       'figures_source':figures_source,
+                      'floats_source':floats_source,
                       'bibitem_ref_metadata':bibitem_ref_metadata,}
         
     content_soup = copy.deepcopy(soup)
@@ -1251,14 +1396,14 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
                    'whole_ref_to_labels':whole_ref_to_labels,
                    'missing_citation_labels':missing_citation_labels}
     os.makedirs(output_dir, exist_ok=True)
-    ReferenceDir= os.path.join(output_dir, "Reference")
-    os.makedirs(ReferenceDir, exist_ok=True)
+    
     Content_Path = os.path.join(output_dir, f'{_paper_id}.retrieved.json') if reterive_result_mode else os.path.join(output_dir, f'{_paper_id}.json')
     with open(Content_Path, 'w') as f:json.dump(output_dict, f, indent=2)
     
-    
-    #logging.info(Content_Path)
-    if not reterive_result_mode:
+    #if global_versbose:logging.info(Content_Path)
+    if not reterive_result_mode and not args.do_not_generate_reference:
+        ReferenceDir= os.path.join(output_dir, "Reference")
+        os.makedirs(ReferenceDir, exist_ok=True)
         keys  = list(bibitem_ref_metadata.keys())
         citation_string = [bibitem_ref_metadata[key] for key in keys]
 
@@ -1272,51 +1417,51 @@ def deal_with_xml_file(tmp_xml_path, output_dir, args:XMLtoJsonConfig):
             json.dump(note_ref_metadata_not_in_context, f, indent=2)
     
         # for section in collect_whole_section_into_one_paper(tree):
-        #     logging.info(f"=======] {section['section_title']} ![==========")
+        #     if global_versbose:logging.info(f"=======] {section['section_title']} ![==========")
         #     for paragraph in section['section_content']:
-        #         logging.info("=======================")
+        #         if global_versbose:logging.info("=======================")
         #         for sentense in paragraph:
-        #             logging.info(sentense)
+        #             if global_versbose:logging.info(sentense)
     return 'Finish'
 
 def xml_to_json_one_path(file_path, args:XMLtoJsonConfig)->Tuple[str,str]:
     file_path = file_path.strip()
-    arxivid   = os.path.basename(file_path.replace('.html',''))
-    arxivid_parent = os.path.basename(os.path.dirname(file_path))
+    arxivid   = os.path.basename(os.path.dirname(file_path))
     if not os.path.exists(file_path):
-        return file_path, 'NoHTML'
-    if args.savepath:
-        output_root = os.path.join(args.savepath,arxivid_parent,arxivid)
-    else:
-        output_root = os.path.dirname(file_path)
+        return file_path, 'NoXML'
+    if os.path.getsize(file_path) < 100:
+        return file_path, 'XMLtooSmall'
+    output_root = os.path.dirname(file_path).replace('_xml','_json')
     
+    output_dir  = os.path.join(output_root, 'uparxive')
+    output_path = os.path.join(output_dir, arxivid+'.json')
     
-    output_dir  = os.path.join(output_root, 'upar5iv')
-    target_file = os.path.join(output_dir, arxivid+'.json')
-    if os.path.exists(target_file) and not args.redo:
+    if os.path.exists(output_path) and not args.redo:
         return arxivid, 'Skip'
+    #global_versbose = args.verbose
+    
     try:
         code = deal_with_xml_file(file_path, output_dir, args)
         return arxivid,code
     except KeyboardInterrupt:
         raise
     except MathDontHaveTex:
-        logging.info(f"MathDontHaveTex =] {file_path}")
+        if global_versbose:logging.info(f"MathDontHaveTex =] {file_path}")
         return arxivid,'MathDontHaveTex'
     except lxml.etree.XMLSyntaxError:
-        logging.info(f"bad xml file =] {file_path}")
+        if global_versbose:logging.info(f"bad xml file =] {file_path}")
         if args.verbose:traceback.print_exc()
         return arxivid,'badxml'
     except TooManyNoteError:
-        #logging.info(f"too many note =] {file_path}")
+        #if global_versbose:logging.info(f"too many note =] {file_path}")
         #analysis['TooManyNoteError'].append(file_path)
         return arxivid,'TooManyNoteError'
     except CiteDontHaveBibRefError:
-        #logging.info(f"cite dont have bibref =] {file_path}")
+        #if global_versbose:logging.info(f"cite dont have bibref =] {file_path}")
         #analysis['CiteDontHaveBibRefError'].append(file_path)
         return arxivid,'CiteDontHaveBibRefError'
     except MisMatchRefError:
-        #logging.info(f"mismatch ref =] {file_path}")
+        #if global_versbose:logging.info(f"mismatch ref =] {file_path}")
         #analysis['MisMatchRefError'].append(file_path)
         return arxivid,'MisMatchRefError'
     except:
@@ -1331,5 +1476,4 @@ def xml_to_json_one_path(file_path, args:XMLtoJsonConfig)->Tuple[str,str]:
     
 def xml_to_json_one_path_wrapper(args):
     arxiv_path, args = args
-    
     return xml_to_json_one_path(arxiv_path, args)

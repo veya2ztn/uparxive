@@ -131,20 +131,27 @@ def discard_brackets(left:str, right:str):
         right = right[1:]
     return left, right
 
-def better_latex_math_code(latex_string):
-    # Add a newline at the end to ensure the last comment is removed
-    latex_string = latex_string.replace("\displaystyle","")
-    latex_string += '\n'
-    pattern = r"(?<!\\)%.*?\n"
-    # Substitute each match with a newline character
-    normalized_string = re.sub(pattern, '\n', latex_string)
-    # Remove all newline characters
-    normalized_string = normalized_string.replace('\n', ' ')
-    # Remove multiple whitespace characters
-    normalized_string = re.sub(r'\s+', ' ', normalized_string)
-    # Remove the additional space we added at the start if it's still there
-    normalized_string = normalized_string.strip()
-    return normalized_string
+def better_latex_math_code(latex_strings):
+    normalized_strings = []
+    for latex_string in latex_strings.split('\n'):
+        latex_string = latex_string.replace("\displaystyle","")
+        # latex_string = latex_string.replace("\%", "<escaped_percent>")
+        # # Remove all comments
+        # latex_string = re.sub(r"%.*", "", latex_string)
+        # # Restore escaped percents
+        # latex_string = latex_string.replace("<escaped_percent>", "\%")
+        pattern = r"(?<!\\)%.*?\n"
+        # Substitute each match with a newline character
+        normalized_string = re.sub(pattern, '\n', latex_string)
+        # Remove all newline characters
+        normalized_string = normalized_string.replace('\n', ' ')
+        # Remove multiple whitespace characters
+        normalized_string = re.sub(r'\s+', ' ', normalized_string)
+        # Remove the additional space we added at the start if it's still there
+        normalized_string = normalized_string.strip()
+        normalized_strings.append(normalized_string)
+    normalized_strings = "\n".join(normalized_strings)
+    return normalized_strings
 
 import argparse
 def print_namespace_tree(namespace, indent=0):

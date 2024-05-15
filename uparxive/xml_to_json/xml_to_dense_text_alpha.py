@@ -603,6 +603,8 @@ def recovery_ref_in_sentense(ref, labels_reference,paper_id, config:XMLtoJsonCon
                     logging.info(f"{key} ==> {val}")
                 raise
             if len(reflabels)>1:
+                
+                
                 logging.info(f'multiple label detected for {labelref} => {reflabels}, we will use the first one')
             ref_type, label_now = reflabels[0]
             labels.append(str(label_now))
