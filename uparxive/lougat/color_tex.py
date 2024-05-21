@@ -4,17 +4,21 @@ import random
 import datetime
 import os
 from pathlib import Path
-
+import logging
 ROOTFILE = Path(__file__).resolve().parent
 with open(os.path.join(ROOTFILE,'Greek.json'),'r') as fi:
     GREEK = json.loads(fi.read())
 with open(os.path.join(ROOTFILE,'MathSymbol.json'),'r') as fi:
     MATH = json.loads(fi.read())
+with open(os.path.join(ROOTFILE,'symbol_dictionary.json'),'r') as fi:
+    SYMBOLS = json.loads(fi.read())
+
 dct_greek2math = {}
 for k,v in GREEK.items():
     dct_greek2math[v] = k   
 COLORS = [(r,g,b) for r in range(5,255,5) for g in range(0,255,5) for b in range(0,255,5)]
 color_idx = 0
+MATH=set(MATH+SYMBOLS)
 
 def greater_rgb(color1,color2):
     '''
@@ -59,100 +63,224 @@ def random_date():
     random_date = datetime.date(year,month,day).strftime('%B %d, %Y')
     return random_date
 
-def colored_word(word):
+def get_one_color():
     global color_idx
     color = f"{'{:03}'.format(COLORS[color_idx][0])},{'{:03}'.format(COLORS[color_idx][1])},{'{:03}'.format(COLORS[color_idx][2])}"
     color_idx  = (color_idx+1)%len(COLORS)
+    return color
+def colored_word(word):
+    if word == "\\sqrt":
+        return word
+    color = get_one_color()
+    if word in [r'\'', r'\"']:
+        return ""
+
+    if word == "&":
+        return "&"
+    if word.startswith(f'\\') and len(word)<3:
+        return word
+    if word == '\\left(': word= '('
+    if word == '\\right)': word= ')'
+    if word == '\\left\{': word= '\{'
+    if word == '\\right\}': word= '\}'
+    if word == '\\left[': word= ']'
+    if word == '\\right]': word= ']'   
+    if word == '\\~': word = " "
     color_word = f'\\textcolor[RGB]{{{color}}}{{{word}}}'
     return color_word
+def encapsulate_command_arguments(text):
+    # List of LaTeX commands that should be followed by a single letter or digit argument
+    commands = [
+        r'\\bar', r'\\dot', r'\\ddot', r'\\vec'
+    ]
+    command_pattern = r'(' + '|'.join(commands) + r')\s+([a-zA-Z0-9])'
 
-def colored_text(text):    
-    
-    texts = [seg for seg in re.split(r'(\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\})+)|\s', text) if seg]  # 使用\tag[]{}或\tag{}或空白符将句子分为单词，括号内不会被切分
-    # seg: 单词、公式等切分片段
-    for j,seg in enumerate(texts):
-        if not seg:
-            continue
-        seg_idx = 0
-        new_seg = ''
-        while seg_idx < len(seg):            
-            # \tag
-            tag_res = re.match(r'\\[A-Za-z]+',seg[seg_idx:])
-            if tag_res:
-                word = tag_res.group(0)
-                # 加颜色显示的tag: \alpha \sum
-                if word in GREEK.keys() or word in MATH:
-                    new_seg += colored_word(word)
-                    seg_idx += tag_res.span()[1]
-                    continue
-                # 需要和后面[]*{}内容一起保留原样的tag
-                elif word in ['\\label','\\begin','\\end','\\includegraphics','\\resizebox','\\cline','\\multicolumn','\\multirow','\\pagestyle','\\email',
-                              '\\input','\\bibliographystyle','\\bibliography','\\newcommand','\\usepackage','\\preprint','\\ref','\\url','\\bibitem','\\bibinfo','\\bibnamefont'] \
-                                or any(banword in word for banword in ['\\cite','\\ref','hspace','vspace']):  # \\citep,\\citen,\\hspace*
-                    ignore_res = re.match(r'\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\}){1,2}',seg[seg_idx:])
-                    new_seg += ignore_res.group(0) if ignore_res else word
-                    seg_idx += ignore_res.span()[1] if ignore_res else tag_res.span()[1]
-                    continue
-                # 需要和后面合并在一起: \\left(  \\left\\{  \\left\vert \\big( \\Bigg\{
-                elif re.match(r'(\\[A-Za-z]+)(\(|\)|\[|\]|\\{|\\}|<|>|\||\\[A-Za-z]+)',seg[seg_idx:]):
-                    ltag_res = re.match(r'(\\[A-Za-z]+)(\(|\)|\[|\]|\\{|\\}|<|>|\||\\[A-Za-z]+)',seg[seg_idx:])
-                    lword = ltag_res.group(0)
-                    if lword in MATH:
-                        new_seg += colored_word(ltag_res.group(0)) 
-                        seg_idx += ltag_res.span()[1] 
-                    else:   # 按照其他tag处理，后面的括号是勿匹配
-                        new_seg +=  word
-                        seg_idx +=  tag_res.span()[1]
-                # 保留原样，不加颜色不忽略后文的tag：\it \frac等   
+    # Use regex to find and replace occurrences where a command is followed by a single letter or digit
+    def replace_func(match):
+        command = match.group(1)  # The command part
+        argument = match.group(2)  # The single character argument
+        return f'{command}{{{argument}}}'  # Encapsulate the argument in braces
+
+    # Perform the transformation
+    transformed_text = re.sub(command_pattern, replace_func, text)
+    return transformed_text
+
+mathfunction = [
+        r'\\bar', r'\\overline', r'\\mathfrak', r'\\mathbb',
+        r'\\script', r'\\mathscr', r'\\code',  r'\\cancel',
+        r'\\dot', r'\\vector', r'\\ddot', r'\\vec', r'\\mathrm',r'\\text'
+    ]
+
+def colored_text_math(text):
+    # LaTeX commands to look for
+    text = encapsulate_command_arguments(text)
+    commands = mathfunction
+    command_pattern = r'(' + '|'.join(commands) + r')\s*({[^}]*}|[^\s]*)'
+
+    # Split the text by space to handle each segment independently
+    segments = text.split()
+    processed_segments = []
+
+    for segment in segments:
+        # Find all occurrences of LaTeX commands followed by their arguments
+        match = re.search(command_pattern, segment)
+        if match:
+            start_index = match.start()
+            if start_index > 0:
+                # Add preceding text if there's any
+                processed_segments.append(segment[:start_index])
+            
+            # Check the character immediately after the command
+            command_end_index = match.end()
+            if command_end_index < len(segment):
+                next_char = segment[command_end_index]
+                if next_char == '{':
+                    # Command followed by a braced argument
+                    brace_end = segment.find('}', command_end_index) + 1
+                    processed_segments.append(segment[start_index:brace_end])
+                    if brace_end < len(segment):
+                        processed_segments.append(segment[brace_end:])
                 else:
-                    new_seg += word
-                    seg_idx += tag_res.span()[1]
-                continue
-            # (x,y)：坐标，保持不变
-            coord_res = re.match(r'\(-?\d+,-?\d+\)',seg[seg_idx:])
-            if coord_res:
-                new_seg += coord_res.group(0)
-                seg_idx += coord_res.span()[1]
-                continue
-            # 制表符：删不净：保持不变
-            vh_res = re.match(r'-?\d+(pt|mm|bp|cm|em|ex|in)',seg[seg_idx:])
-            if vh_res:
-                new_seg += vh_res.group(0)
-                seg_idx += vh_res.span()[1]
-                continue
-            # invisible符号：_, ^, { 等：不加颜色，保留原样
-            invisible_res = re.match(r'(\{\[\})|_|\^|\||\{|\}|\$|\\\\|\\$|\[.*\]|&|%|\s+|\*|~|#|\[|\]|(natexlab)|(urlprefix)|\\(!|,|;)',seg[seg_idx:])
-            if invisible_res:
-                # 上下标没加括号：后面必为一个字母或希腊字母，这时最好加上括号
-                if seg[seg_idx] in ['_','^'] and seg_idx < len(seg)-1 and seg[seg_idx+1] != '{':
-                    greek_res = re.match(r'\\[A-Za-z]+',seg[seg_idx+1:])
-                    if greek_res:   # 希腊字母
-                        new_seg += seg[seg_idx]+'{'+greek_res.group(0) + '}'
-                        seg_idx += 1+greek_res.span()[1]
-                    else:   # 英文字母
-                        new_seg += seg[seg_idx]+'{'+seg[seg_idx+1] + '}'
-                        seg_idx += 2
-                else:
-                    new_seg += invisible_res.group(0)  
-                    seg_idx += invisible_res.span()[1] 
-                continue
-            # visible符号：字母、数字、运算符、转义字符等: 加颜色
-            visible_res = re.match(r'(\.*\s*[A-Za-z]+)|(\d+(,|\.)*)+|\+|-|/|>|<|=|\(|\)|,|\.|@|;|!|\?|\:|\'|\"|`|(\\[^\\])',seg[seg_idx:])
-            if visible_res:
-                new_seg += colored_word(visible_res.group(0))
-                seg_idx += visible_res.span()[1]
+                    # Command followed by a space and a single character
+                    processed_segments.append(segment[start_index:command_end_index+2])
+                    if command_end_index+2 < len(segment):
+                        processed_segments.append(segment[command_end_index+2:])
+            else:
+                # Command at the end of the segment
+                processed_segments.append(segment[start_index:])
+        else:
+            # No command found, append the whole segment
+            processed_segments.append(segment)
+
+    processed_segments = [treat_seg(t) for t in processed_segments]
+    # Rejoin the processed segments with space
+    # print(text)
+    # print(processed_segments)
+    return ' '.join(processed_segments)
+
+def treat_seg(seg):
+    seg_idx = 0
+    new_seg = ''
+    while seg_idx < len(seg):  
+        # \tag
+        tag_res = re.match(r'\\[A-Za-z]+',seg[seg_idx:])
+        if tag_res:
+            word = tag_res.group(0)
+            # 加颜色显示的tag: \alpha \sum
+            if word in GREEK.keys() or word in MATH:
+                """
+                \frac is a function and cause problem when it is colored
+                \bar  is a function and cause problem when it followed a colored should corlor for whole like \color{\bar\nu}
+                """
+                new_seg += colored_word(word)
+                seg_idx += tag_res.span()[1]
+                logging.debug(f"at seg_idx={seg_idx}. word is greek={word}")
                 continue
             
-            else: # 理论上不应该到这里，先保留原样
-                print(f'unhandled char:"{seg[seg_idx:]}"')
-                new_seg += seg[seg_idx]
-                seg_idx += 1
+            # 需要和后面[]*{}内容一起保留原样的tag
+            elif word in ['\\label','\\begin','\\end','\\includegraphics','\\resizebox','\\cline','\\multicolumn','\\multirow','\\pagestyle','\\email',
+                            '\\input','\\bibliographystyle','\\bibliography','\\newcommand','\\usepackage','\\preprint','\\ref','\\url','\\bibitem','\\bibinfo','\\bibnamefont'] \
+                            or any(banword in word for banword in ['\\cite','\\ref','hspace','vspace']):  # \\citep,\\citen,\\hspace*
+                ignore_res = re.match(r'\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\}){1,2}',seg[seg_idx:])
+                new_seg += ignore_res.group(0) if ignore_res else word
+                seg_idx += ignore_res.span()[1] if ignore_res else tag_res.span()[1]
+                logging.debug(f"at seg_idx={seg_idx}. word is tag={word}")
                 continue
+            # 需要和后面[]*{}内容一起保留原样的tag
+            elif word in mathfunction and seg_idx+ tag_res.span()[1] < len(seg)  and seg[seg_idx+ tag_res.span()[1]] not in [r'[',r'{',r'<',r'(']: ### otherwise fail into the third part
+                ## in some case it use \bar a which will be split into \bar and a, so we need to merge them
+                seg_idx += tag_res.span()[1]
+                greek_res = re.match(r'\\[A-Za-z]+',seg[seg_idx:])
+                try:
+                    if greek_res:   # 希腊字母
+                        new_seg += colored_word(word + greek_res.group(0)) 
+                        seg_idx += 0 + greek_res.span()[1]
+                    else:   # 英文字母
+                        
+                        new_seg += colored_word(word +  seg[seg_idx+1]) 
+                        seg_idx += 1 ## this is for the "{" which we dont have one, such skip
+                except:
+                    print(word, seg)
+                    raise
+                logging.debug(f"math function:{new_seg}")
+                continue
+            # 需要和后面合并在一起: \\left(  \\left\\{  \\left\vert \\big( \\Bigg\{
+            elif re.match(r'(\\[A-Za-z]+)(\(|\)|\[|\]|\\{|\\}|<|>|\||\\[A-Za-z]+)',seg[seg_idx:]):
+                ltag_res = re.match(r'(\\[A-Za-z]+)(\(|\)|\[|\]|\\{|\\}|<|>|\||\\[A-Za-z]+)',seg[seg_idx:])
+                lword = ltag_res.group(0)
+                if lword in MATH:
+                    new_seg += colored_word(ltag_res.group(0)) 
+                    seg_idx += ltag_res.span()[1] 
+                else:   # 按照其他tag处理，后面的括号是勿匹配
+                    new_seg +=  word
+                    seg_idx +=  tag_res.span()[1]
                 
-         
-        texts[j] = new_seg   
+            # 保留原样，不加颜色不忽略后文的tag：\it \frac等   
+            else:
+                new_seg += word
+                seg_idx += tag_res.span()[1]
+                logging.debug("tag_res:",word)
+            continue
+        # (x,y)：坐标，保持不变
+        coord_res = re.match(r'\(-?\d+,-?\d+\)',seg[seg_idx:])
+        if coord_res:
+            new_seg += coord_res.group(0)
+            seg_idx += coord_res.span()[1]
+            logging.debug("coord_res:",coord_res.group(0),f"start from {seg_idx}")
+            continue
+        # 制表符：删不净：保持不变
+        vh_res = re.match(r'-?\d+(pt|mm|bp|cm|em|ex|in)',seg[seg_idx:])
+        if vh_res:
+            new_seg += vh_res.group(0)
+            seg_idx += vh_res.span()[1]
+            logging.debug("vh_res:",vh_res.group(0),f"go to {seg_idx}")
+            continue
+        # invisible符号：_, ^, { 等：不加颜色，保留原样
+        invisible_res = re.match(r'(\{\[\})|_|\^|\||\{|\}|\$|\\\\|\\$|\[.*\]|&|%|\s+|\*|~|#|\[|\]|(natexlab)|(urlprefix)|\\(!|,|;)',seg[seg_idx:])
+        if invisible_res:
+            # 上下标没加括号：后面必为一个字母或希腊字母，这时最好加上括号
+            if seg[seg_idx] in ['_','^'] and seg_idx < len(seg)-1 and seg[seg_idx+1] != '{':
+                greek_res = re.match(r'\\[A-Za-z]+',seg[seg_idx+1:])
+                if greek_res:   # 希腊字母
+                    new_seg += seg[seg_idx]+'{' + colored_word(greek_res.group(0)) + '}'
+                    seg_idx += 1 + greek_res.span()[1]
+                else:   # 英文字母
+                    new_seg += seg[seg_idx]+'{'+colored_word(seg[seg_idx+1]) + '}'
+                    seg_idx += 2
+            else:
+                new_seg += invisible_res.group(0)  
+                seg_idx += invisible_res.span()[1] 
+            logging.debug("invisible:",invisible_res.group(0),f"go to {seg_idx}", f"new_seg: {new_seg}" )
+            continue
+        # visible符号：字母、数字、运算符、转义字符等: 加颜色
+        visible_res = re.match(r'(\.*\s*[A-Za-z]+)|(\d+(,|\.)*)+|\+|-|/|>|<|=|\(|\)|,|\.|@|;|!|\?|\:|\'|\"|`|(\\[^\\])',seg[seg_idx:])
+        if visible_res:
+            new_seg += colored_word(visible_res.group(0))
+            seg_idx += visible_res.span()[1]
+            logging.debug("visible_res:",visible_res.group(0),f"go to {seg_idx}", f"new_seg: {new_seg}" )
+            continue
         
-    color_text = ' '.join(texts)
+        else: # 理论上不应该到这里，先保留原样
+            logging.debug(f'unhandled char:"{seg[seg_idx:]}"', f"new_seg: {new_seg}" )
+            new_seg += seg[seg_idx]
+            seg_idx += 1
+            
+            continue
+    return new_seg
+
+from tqdm.auto import tqdm
+def colored_text(text, end='\n'):    
+    if len(text.strip())==0:return text
+    texts = [seg for seg in re.split(r'(\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\})+)|\s', text) if seg]  # 使用\tag[]{}或\tag{}或空白符将句子分为单词，括号内不会被切分
+    new_text = []
+
+    for j,seg in enumerate(texts):
+        if not seg: continue
+        new_seg = treat_seg(seg)
+            
+        new_text.append(new_seg )
+        
+    color_text = end.join(new_text)
     return color_text
 
 def colored_file(tex_file, output_file=None):

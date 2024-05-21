@@ -5,10 +5,10 @@ from ..utils import get_tex_file_name
 @dataclass
 class TexStandardConfig(BatchModeConfig):
     modelist = ['clean', 'revtex','nopackage','clean_beta','revtex_beta']
-    extra_mode_list = ['prepare_for_color']
+    extra_mode_list = ['prepare_for_color','seek_documentclass']
     mode : str = 'clean'
     task_name = 'tex_standard'
-
+    only_deal_with_the_documentclass: bool = False
     @property
     def excluded_commands(self):
         return ['\\input', '\\def','\\Declare', '\\define',
@@ -34,9 +34,14 @@ class TexStandardConfig(BatchModeConfig):
         with open(os.path.join(module_dir,'blacklist_package.beta'),'r') as f:
             blacklisted_packages3 = set([t.strip() for t in f.readlines()])
         self.blacklisted_packages3 = blacklisted_packages3|self.blacklisted_packages
-def read_the_tex_file_into_memory_without_comment(tex_path):
-    with open(tex_path, 'r', encoding='utf-8', errors='ignore') as file:
-        lines = file.readlines()
+
+
+def read_the_tex_file_into_memory_without_comment(tex_path, use_content=False):
+    if use_content:
+        lines = tex_path.splitlines(True)
+    else:
+        with open(tex_path, 'r', encoding='utf-8', errors='ignore') as file:
+            lines = file.readlines()
 
     def remove_comments(line):
         # Split the line by % that are not preceded by a backslash
@@ -357,6 +362,28 @@ def deal_with_the_documentclass(content,mode,blacklisted_packages=None,ForceQ= F
 #################### main ###################
 #############################################
 def standardize_one_file(file_path, args:TexStandardConfig):
+    file_path = get_tex_file_name(file_path, modes = args.modelist)
+    lines_without_comments = read_the_tex_file_into_memory_without_comment(file_path)
+    lines_without_comments = [line for line in lines_without_comments if line]
+    content = "".join(lines_without_comments)
+    if args.mode == 'seek_documentclass':
+        # Regular expression to match the \documentclass command
+        pattern = r'\\documentclass\[(.*?)\]\{(.*?)\}'
+
+        # Search for matches
+        match = re.search(pattern, content)
+
+        if match:
+            options = match.group(1).split(',')  # Split the options by comma
+            options = [option.strip() for option in options]  # Strip any leading/trailing whitespace
+            document_class = match.group(2).strip()  # Get the document class and strip whitespace
+            if document_class == 'article':
+                tqdm.write(file_path)
+                raise
+            return document_class, 'classname'
+        else:
+            
+            return "", 'classname'
     if args.mode == 'revtex':
         blacklist = args.blacklisted_packages2
         ForceQ = True
@@ -376,19 +403,18 @@ def standardize_one_file(file_path, args:TexStandardConfig):
     else:
         raise NotImplementedError
     
-    file_path = get_tex_file_name(file_path, modes = args.modelist)
-    lines_without_comments = read_the_tex_file_into_memory_without_comment(file_path)
-    lines_without_comments = [line for line in lines_without_comments if line]
-
+    
     new_file_path = file_path[:-4]+f'.{args.mode}.tex'
 
-
-    content = "".join(lines_without_comments)
+    
+    
+    
     content = comment_out_preamble(content,excluded_commands=args.excluded_commands)
     content = deal_with_the_documentclass(content,args.mode,blacklisted_packages=blacklist, ForceQ=ForceQ)
-    content = filter_out_affiliation(content, excluded_commands = args.excluded_commands)
-    content = filter_out_figures(content)
-    content = filter_out_tables(content)
+    if not args.only_deal_with_the_documentclass:
+        content = filter_out_affiliation(content, excluded_commands = args.excluded_commands)
+        content = filter_out_figures(content)
+        content = filter_out_tables(content)
     with open(new_file_path, 'w', encoding='utf-8') as file:
         file.write(content)
     return new_file_path, 'finish'

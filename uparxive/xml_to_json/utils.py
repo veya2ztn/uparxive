@@ -34,6 +34,7 @@ class CiteDontHaveBibRefError(NotImplementedError):pass
 class TooManyNoteError(NotImplementedError):pass
 class PleaseCheckError(NotImplementedError):pass
 class InfinityLoop(NotImplementedError):pass
+class UnknowTextFormat(NotImplementedError):pass
 
 class LoopCounter:
     def __init__(self, max_iterations=100):

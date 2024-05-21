@@ -64,6 +64,7 @@ obtain the `.json` format data
   - ``python python_script/xml_to_json.py --root [SourPath]``
 - *Update 2025.04.30*: [html_to_dense_text.py](https://github.com/veya2ztn/uparxive/blob/main/uparxive/xml_to_json/html_to_dense_text.py) aim to convert the `ar5iv` dataset from `html` format to llm-friendly data.
   - `python python_script/html_to_json.py --root [SourPath]`
+- *Update 2025.05.22*: Nougat provide a standard parser for the latexmlc html format `from nougat.dataset.parser.html2md import html2md`. I do think this solution is much more convience than my custom implement. 
 
 
 

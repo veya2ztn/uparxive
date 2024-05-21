@@ -28,7 +28,7 @@ logging.basicConfig(level=log_level, format='%(message)s')
 import traceback
 enable_checkCiteDontHaveBibRef = False
 enable_checkTooManyNote= False
-
+enable_checkUnknowTextFormat = True
 global_versbose=False
 @dataclass
 class XMLtoJsonConfig(BatchModeConfig):
@@ -40,6 +40,15 @@ class XMLtoJsonConfig(BatchModeConfig):
     verbose: bool = False
     use_plain_citation:bool = False
     do_not_generate_reference:bool = False
+
+def checkUnknowTextFormat(string):
+    if enable_checkUnknowTextFormat:
+        if global_versbose:logging.info(string)
+        raise UnknowTextFormat
+    else:
+        if global_versbose:logging.info(string)
+        return 
+
 def checkCiteDontHaveBibRef(string):
     if enable_checkCiteDontHaveBibRef:
         if global_versbose:logging.info(string)
@@ -113,8 +122,7 @@ def discard_text_format_in_sentense(soup: BeautifulSoup, cleanmode=False):
     
     for text in soup.find_all('text','emph'):
         if 'fontsize' not in text.attrs:
-            pass
-            #if global_versbose:logging.warning(f"it seem we find a none register special txt like \n {text.prettify()}")
+            checkUnknowTextFormat(f"it seem we find a none register special txt like \n {text.prettify()}")
         text.replace_with(*text.contents)
 
 def get_label_of_the_element(soup: BeautifulSoup):
@@ -1464,6 +1472,10 @@ def xml_to_json_one_path(file_path, args:XMLtoJsonConfig)->Tuple[str,str]:
         #if global_versbose:logging.info(f"mismatch ref =] {file_path}")
         #analysis['MisMatchRefError'].append(file_path)
         return arxivid,'MisMatchRefError'
+    except UnknowTextFormat:
+        #if global_versbose:logging.info(f"mismatch ref =] {file_path}")
+        #analysis['MisMatchRefError'].append(file_path)
+        return arxivid,'UnknowTextFormat'
     except:
         
         if args.verbose == 1:
