@@ -113,7 +113,89 @@ mathfunction = [
         r'\\dot', r'\\vector', r'\\ddot', r'\\vec', r'\\mathrm',r'\\text'
     ]
 
-def colored_text_math(text):
+
+import latex2mathml.commands as commands
+from TexSoup.utils import Token
+from TexSoup.data import BraceGroup,TexCmd,TexArgs
+from TexSoup import TexSoup
+default_use_adjoint_char_math_func = set(commands.COMMANDS_WITH_ONE_PARAMETER)|set(commands.LOCAL_FONTS.keys())
+single_char_math_symbol = MATH
+
+def deal_with_one_envs(elements):
+    string_list = []
+    i=0
+    while i < len(elements):
+        
+        element = elements[i]
+        if element is None:
+            i+=1
+            continue
+        if  isinstance(element, Token):
+            string_list.append(colored_text(element.text))
+        elif isinstance(element, BraceGroup):
+            element.contents = deal_with_one_envs(element.contents)
+            string_list.append(str(element))
+        elif isinstance(element, TexCmd):
+            commend = "\\"+element.name
+            if commend in default_use_adjoint_char_math_func:
+                if len(element.args)==0:
+                    ## then we should take the first part from followed 
+                    if i == len(elements) - 1:
+                        raise NotImplementedError(f"may better remove the part ")
+
+                    if  isinstance(elements[i+1], Token):
+                        text=elements[i+1].text.strip()
+                        first=text[0]
+                        remain=text[1:]
+                        elements[i+1].text = remain
+
+                    elif isinstance(elements[i+1], TexCmd):
+                        first = elements[i+1]
+                        elements[i+1]=None
+                    else:
+                        assert not isinstance(elements[i+1], BraceGroup)
+
+                    element.args= TexArgs([BraceGroup(first)])
+            elif commend in single_char_math_symbol:
+            
+                while len(element.args)>0:
+                    # lets put this args back into the sequence
+                    
+                    elements.insert(i+1, element.args.pop(-1))
+                    
+            else:
+                element.args = TexArgs(deal_with_one_envs(element.args))
+                
+            if len(element.args) == 0:
+                string_list.append(colored_text(commend))
+            elif  commend in default_use_adjoint_char_math_func:
+                string_list.append(colored_word(str(element)))
+            else:
+                string_list.append(str(element))
+                
+        else:           
+                    
+            raise NotImplementedError(f"UnKnow TexSoup Type:{type(element)}")
+        i+=1
+  
+    return string_list
+
+
+def colored_text_math(math_latex):
+    #print(f"we deal with => {math_latex}  =>" , end=' ')
+    math_latex = math_latex.strip("$")
+    try:
+        soup = TexSoup("$"+math_latex+"$")
+    except:
+        print(f'fail for math code:')
+        print(math_latex)
+        raise
+    elements = soup.expr.all[0].contents
+    result =  "".join(deal_with_one_envs(elements))
+    #print(result)
+    return "$" + result + "$"
+
+def colored_text_math_old(text):
     # LaTeX commands to look for
     text = encapsulate_command_arguments(text)
     commands = mathfunction
@@ -224,12 +306,12 @@ def treat_seg(seg):
                 logging.debug("tag_res:",word)
             continue
         # (x,y)：坐标，保持不变
-        coord_res = re.match(r'\(-?\d+,-?\d+\)',seg[seg_idx:])
-        if coord_res:
-            new_seg += coord_res.group(0)
-            seg_idx += coord_res.span()[1]
-            logging.debug("coord_res:",coord_res.group(0),f"start from {seg_idx}")
-            continue
+        # coord_res = re.match(r'\(-?\d+,-?\d+\)',seg[seg_idx:])
+        # if coord_res:
+        #     new_seg += coord_res.group(0)
+        #     seg_idx += coord_res.span()[1]
+        #     logging.debug("coord_res:",coord_res.group(0),f"start from {seg_idx}")
+        #     continue
         # 制表符：删不净：保持不变
         vh_res = re.match(r'-?\d+(pt|mm|bp|cm|em|ex|in)',seg[seg_idx:])
         if vh_res:
@@ -238,7 +320,8 @@ def treat_seg(seg):
             logging.debug("vh_res:",vh_res.group(0),f"go to {seg_idx}")
             continue
         # invisible符号：_, ^, { 等：不加颜色，保留原样
-        invisible_res = re.match(r'(\{\[\})|_|\^|\||\{|\}|\$|\\\\|\\$|\[.*\]|&|%|\s+|\*|~|#|\[|\]|(natexlab)|(urlprefix)|\\(!|,|;)',seg[seg_idx:])
+        #invisible_res = re.match(r'(\{\[\})|_|\^|\||\{|\}|\$|\\\\|\\$|\[.*\]|&|%|\s+|\*|~|#|\[|\]|(natexlab)|(urlprefix)|\\(!|,|;)',seg[seg_idx:])
+        invisible_res = re.match(r'(\{\})|_|\^|\||\{|\}|\$|\\\\|\\$|&|%|\s+|\*|~|#|(natexlab)|(urlprefix)|\\(!|,|;)',seg[seg_idx:])
         if invisible_res:
             # 上下标没加括号：后面必为一个字母或希腊字母，这时最好加上括号
             if seg[seg_idx] in ['_','^'] and seg_idx < len(seg)-1 and seg[seg_idx+1] != '{':
@@ -343,197 +426,6 @@ def colored_file(tex_file, output_file=None):
     with open(output_file,'w',encoding='utf-8') as fo:
         fo.writelines(lines)
          
-class colorful_engine:
-    def __init__(self, enable):
-        self.enable = enable
-        self.color_idx = 0
-    def get_one_color(self):
-        if self.enable:
-            color = f"{'{:03}'.format(COLORS[self.color_idx][0])},{'{:03}'.format(COLORS[self.color_idx][1])},{'{:03}'.format(COLORS[self.color_idx][2])}"
-            self.color_idx = (self.color_idx+1)%len(COLORS)
-            return color
-        else:
-            return f"0,0,0"
-        
-    def treat_seg(self,seg):
-        seg_idx = 0
-        new_seg = ''
-        while seg_idx < len(seg):  
-            # \tag
-            tag_res = re.match(r'\\[A-Za-z]+',seg[seg_idx:])
-            if tag_res:
-                word = tag_res.group(0)
-                # 加颜色显示的tag: \alpha \sum
-                if word in GREEK.keys() or word in MATH:
-                    """
-                    \frac is a function and cause problem when it is colored
-                    \bar  is a function and cause problem when it followed a colored should corlor for whole like \color{\bar\nu}
-                    """
-                    new_seg += colored_word(word)
-                    seg_idx += tag_res.span()[1]
-                    logging.debug(f"at seg_idx={seg_idx}. word is greek={word}")
-                    continue
-                
-                # 需要和后面[]*{}内容一起保留原样的tag
-                elif word in ['\\label','\\begin','\\end','\\includegraphics','\\resizebox','\\cline','\\multicolumn','\\multirow','\\pagestyle','\\email',
-                                '\\input','\\bibliographystyle','\\bibliography','\\newcommand','\\usepackage','\\preprint','\\ref','\\url','\\bibitem','\\bibinfo','\\bibnamefont'] \
-                                or any(banword in word for banword in ['\\cite','\\ref','hspace','vspace']):  # \\citep,\\citen,\\hspace*
-                    ignore_res = re.match(r'\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\}){1,2}',seg[seg_idx:])
-                    new_seg += ignore_res.group(0) if ignore_res else word
-                    seg_idx += ignore_res.span()[1] if ignore_res else tag_res.span()[1]
-                    logging.debug(f"at seg_idx={seg_idx}. word is tag={word}")
-                    continue
-                # 需要和后面[]*{}内容一起保留原样的tag
-                elif word in mathfunction and seg_idx+ tag_res.span()[1] < len(seg)  and seg[seg_idx+ tag_res.span()[1]] not in [r'[',r'{',r'<',r'(']: ### otherwise fail into the third part
-                    ## in some case it use \bar a which will be split into \bar and a, so we need to merge them
-                    seg_idx += tag_res.span()[1]
-                    greek_res = re.match(r'\\[A-Za-z]+',seg[seg_idx:])
-                    try:
-                        if greek_res:   # 希腊字母
-                            new_seg += colored_word(word + greek_res.group(0)) 
-                            seg_idx += 0 + greek_res.span()[1]
-                        else:   # 英文字母
-                            
-                            new_seg += colored_word(word +  seg[seg_idx+1]) 
-                            seg_idx += 1 ## this is for the "{" which we dont have one, such skip
-                    except:
-                        print(word, seg)
-                        raise
-                    logging.debug(f"math function:{new_seg}")
-                    continue
-                # 需要和后面合并在一起: \\left(  \\left\\{  \\left\vert \\big( \\Bigg\{
-                elif re.match(r'(\\[A-Za-z]+)(\(|\)|\[|\]|\\{|\\}|<|>|\||\\[A-Za-z]+)',seg[seg_idx:]):
-                    ltag_res = re.match(r'(\\[A-Za-z]+)(\(|\)|\[|\]|\\{|\\}|<|>|\||\\[A-Za-z]+)',seg[seg_idx:])
-                    lword = ltag_res.group(0)
-                    if lword in MATH:
-                        new_seg += colored_word(ltag_res.group(0)) 
-                        seg_idx += ltag_res.span()[1] 
-                    else:   # 按照其他tag处理，后面的括号是勿匹配
-                        new_seg +=  word
-                        seg_idx +=  tag_res.span()[1]
-                    
-                # 保留原样，不加颜色不忽略后文的tag：\it \frac等   
-                else:
-                    new_seg += word
-                    seg_idx += tag_res.span()[1]
-                    logging.debug("tag_res:",word)
-                continue
-            # (x,y)：坐标，保持不变
-            coord_res = re.match(r'\(-?\d+,-?\d+\)',seg[seg_idx:])
-            if coord_res:
-                new_seg += coord_res.group(0)
-                seg_idx += coord_res.span()[1]
-                logging.debug("coord_res:",coord_res.group(0),f"start from {seg_idx}")
-                continue
-            # 制表符：删不净：保持不变
-            vh_res = re.match(r'-?\d+(pt|mm|bp|cm|em|ex|in)',seg[seg_idx:])
-            if vh_res:
-                new_seg += vh_res.group(0)
-                seg_idx += vh_res.span()[1]
-                logging.debug("vh_res:",vh_res.group(0),f"go to {seg_idx}")
-                continue
-            # invisible符号：_, ^, { 等：不加颜色，保留原样
-            invisible_res = re.match(r'(\{\[\})|_|\^|\||\{|\}|\$|\\\\|\\$|\[.*\]|&|%|\s+|\*|~|#|\[|\]|(natexlab)|(urlprefix)|\\(!|,|;)',seg[seg_idx:])
-            if invisible_res:
-                # 上下标没加括号：后面必为一个字母或希腊字母，这时最好加上括号
-                if seg[seg_idx] in ['_','^'] and seg_idx < len(seg)-1 and seg[seg_idx+1] != '{':
-                    greek_res = re.match(r'\\[A-Za-z]+',seg[seg_idx+1:])
-                    if greek_res:   # 希腊字母
-                        new_seg += seg[seg_idx]+'{' + colored_word(greek_res.group(0)) + '}'
-                        seg_idx += 1 + greek_res.span()[1]
-                    else:   # 英文字母
-                        new_seg += seg[seg_idx]+'{'+colored_word(seg[seg_idx+1]) + '}'
-                        seg_idx += 2
-                else:
-                    new_seg += invisible_res.group(0)  
-                    seg_idx += invisible_res.span()[1] 
-                logging.debug("invisible:",invisible_res.group(0),f"go to {seg_idx}", f"new_seg: {new_seg}" )
-                continue
-            # visible符号：字母、数字、运算符、转义字符等: 加颜色
-            visible_res = re.match(r'(\.*\s*[A-Za-z]+)|(\d+(,|\.)*)+|\+|-|/|>|<|=|\(|\)|,|\.|@|;|!|\?|\:|\'|\"|`|(\\[^\\])',seg[seg_idx:])
-            if visible_res:
-                new_seg += colored_word(visible_res.group(0))
-                seg_idx += visible_res.span()[1]
-                logging.debug("visible_res:",visible_res.group(0),f"go to {seg_idx}", f"new_seg: {new_seg}" )
-                continue
-            
-            else: # 理论上不应该到这里，先保留原样
-                logging.debug(f'unhandled char:"{seg[seg_idx:]}"', f"new_seg: {new_seg}" )
-                new_seg += seg[seg_idx]
-                seg_idx += 1
-                
-                continue
-        return new_seg
-
-    def colored_text_math(self,text):
-        # LaTeX commands to look for
-        text = encapsulate_command_arguments(text)
-        commands = mathfunction
-        command_pattern = r'(' + '|'.join(commands) + r')\s*({[^}]*}|[^\s]*)'
-
-        # Split the text by space to handle each segment independently
-        segments = text.split()
-        processed_segments = []
-
-        for segment in segments:
-            # Find all occurrences of LaTeX commands followed by their arguments
-            match = re.search(command_pattern, segment)
-            if match:
-                start_index = match.start()
-                if start_index > 0:
-                    # Add preceding text if there's any
-                    processed_segments.append(segment[:start_index])
-                
-                # Check the character immediately after the command
-                command_end_index = match.end()
-                if command_end_index < len(segment):
-                    next_char = segment[command_end_index]
-                    if next_char == '{':
-                        # Command followed by a braced argument
-                        brace_end = segment.find('}', command_end_index) + 1
-                        processed_segments.append(segment[start_index:brace_end])
-                        if brace_end < len(segment):
-                            processed_segments.append(segment[brace_end:])
-                    else:
-                        # Command followed by a space and a single character
-                        processed_segments.append(segment[start_index:command_end_index+2])
-                        if command_end_index+2 < len(segment):
-                            processed_segments.append(segment[command_end_index+2:])
-                else:
-                    # Command at the end of the segment
-                    processed_segments.append(segment[start_index:])
-            else:
-                # No command found, append the whole segment
-                processed_segments.append(segment)
-
-        processed_segments = [self.treat_seg(t) for t in processed_segments]
-        # Rejoin the processed segments with space
-        # print(text)
-        # print(processed_segments)
-        return ' '.join(processed_segments)
-
-
-    def colored_word(self, word):
-        if word == "\\sqrt":
-            return word
-        color = self.get_one_color()
-        if word in [r'\'', r'\"']:
-            return ""
-
-        if word == "&":
-            return "&"
-        if word.startswith(f'\\') and len(word)<3:
-            return word
-        if word == '\\left(': word= '('
-        if word == '\\right)': word= ')'
-        if word == '\\left\{': word= '\{'
-        if word == '\\right\}': word= '\}'
-        if word == '\\left[': word= ']'
-        if word == '\\right]': word= ']'   
-        if word == '\\~': word = " "
-        color_word = f'\\textcolor[RGB]{{{color}}}{{{word}}}'
-        return color_word
-
 if __name__ == '__main__':
     import sys
     source_path = sys.argv[1]

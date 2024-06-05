@@ -8,7 +8,7 @@ from PIL import Image, ImageChops
 import subprocess
 import regex
 from ..batch_run_utils import BatchModeConfig, dataclass
-
+import latex2mathml.commands as commands
 
 @dataclass
 class PrepareColorFulConfig(BatchModeConfig):
@@ -23,7 +23,8 @@ class PrepareColorFulConfig(BatchModeConfig):
     color_mode:str ='colorful_table_figure'
 
     def __post_init__(self):
-        assert self.do_colorful, "please in current version, please force colorful the tex and adjust in color_mode"
+        if not self.do_colorful:
+            print("please in current version, please force colorful the tex and adjust in color_mode")
 
 def remove_footnotes(text):
     result = []
@@ -136,6 +137,7 @@ def replace_ref(content, reference_map):
         content = regex.sub(pattern, replace_cite, content, flags=regex.DOTALL)
 
     return content
+
 def filter_out_preamble_block(content, redefine_commands=None, layout_commands=None):
     assert redefine_commands is not None
     assert layout_commands is not None
@@ -360,6 +362,106 @@ def env_partition(content):
 
     return elements
 
+
+
+def parse_newcommand(line):
+   
+    # Initialize variables
+    command_name = None
+    num_params = None
+    definition = None
+
+    # Extract the command name
+    start_idx = line.find('{\\') + 2
+    end_idx = line.find('}', start_idx)
+    if start_idx > 1 and end_idx != -1:
+        command_name = '\\' + line[start_idx:end_idx]
+
+    # Check for optional parameters
+    param_idx = line.find('[', end_idx)
+    if param_idx != -1:
+        end_param_idx = line.find(']', param_idx)
+        if end_param_idx != -1:
+            num_params = int(line[param_idx+1:end_param_idx])
+
+    # Extract the definition
+    start_def_idx = line.find('{', end_idx + 1) + 1
+    end_def_idx = line.rfind('}')
+    if start_def_idx > 0 and end_def_idx != -1:
+        definition = line[start_def_idx:end_def_idx]
+
+    return {command_name:{
+            "params": num_params,
+            "definition": definition
+        }}
+
+def parse_redefine(commands_str):
+    commands = {}
+    lines = commands_str.strip().splitlines()
+    for line in lines:
+        if line.startswith('\\newcommand'):
+            command = parse_newcommand(line)
+            commands = commands|command
+    return commands
+
+
+def apply_macros(latex_text, commands):
+    # Replace each command in the text
+    
+    for command, details in commands.items():
+
+        if details['definition'] is None:continue
+        if details['params'] is None:
+            # Direct replacement if there are no parameters
+            pattern = "\\" + command + r'(?=\s|\Z)'
+
+            latex_text = re.sub(pattern, details['definition'].replace("\\", "\\\\"), latex_text)
+        else:
+            
+            # Replacement with parameter handling
+            def replacer(match):
+                # Replace each parameter occurrence
+                content = details['definition']
+                for i in range(details['params']):
+                    param_match = match.group(i + 1)  # Get the i-th parameter group
+                    # Clean and unbrace the parameter content
+                    cleaned_param = param_match[1:-1] if len(param_match) > 2 else param_match
+                    content = content.replace(f"#{i + 1}", cleaned_param)
+                return content
+            
+            # Create a regex pattern that matches this command followed by its parameters in nested braces
+            brace_pattern = r'(\{(?:[^{}]++|(?1))*\})'
+            full_pattern  = "\\" + command + brace_pattern * details['params']
+            latex_text    = regex.sub(full_pattern, replacer, latex_text)
+    
+    return latex_text
+
+def expand_macro(contents):
+    latex_blocks = blockwise_content(contents, blocks=[(r'\\documentclass.*?\\begin{document}', 'preamble')])
+    new_latex_blocks = []
+    commands = None
+    for _type, content in latex_blocks:
+        if _type == 'preamble':
+            assert commands is None
+            _, command_str, _ =  filter_out_preamble_block(content,redefine_commands = ['\\def','\\Declare', '\\define',
+                            '\\newcommand', '\\let',
+                            '\\def',
+                            '\\newtheorem',
+                            '\\providecommand',
+                            '\\renewcommand'
+                            ],layout_commands = [] )
+            #print(command_str)
+            commands = parse_redefine(command_str)
+            
+        elif commands: ### <--- may cause unexcep error when replace math
+            content = apply_macros(content,commands)
+        new_latex_blocks.append(content)
+    new_latex_blocks = "\n".join(new_latex_blocks)
+    return new_latex_blocks
+
+
+
+
 def process_latex_content(content, collect_preamble=True, color_mode='colorful_table_figure'):
     redefine_commands = ['\\def','\\Declare', '\\define',
                          '\\newcommand', '\\let',
@@ -375,7 +477,7 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
  
 
     latex_blocks = blockwise_content(content)
-    
+
      
     preamble_content = [""]
     layerout_blocks  = []
@@ -402,6 +504,7 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
                 new_blocks.append([block_type, block_content])
 
             preamble_content = "\n".join(preamble_content)
+            
             # Add updated preamble to the new blocks list
             new_blocks.insert(0, ['preamble', preamble_content.strip()])
     else:
@@ -900,24 +1003,29 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
     content = read_content_with_input(file_path)
     
     lines_without_comments = read_the_tex_file_into_memory_without_comment(content, use_content=True)
-    lines_without_comments = [line.strip()+'\n' for line in lines_without_comments ]
+    lines_without_comments = [line.strip()+'\n' for line in lines_without_comments]
     content = "".join(lines_without_comments)
     content = replace_ref(content, reference_map=reference_map)
     if args.add_bbl:
         content = add_bbl_content(content,file_path)
     else:
         content = remove_the_bib(content)
+    #content = expand_newcommand_in_latex(content)
+    content = content.replace("\\tableofcontents", "") ### we can not handle content
+    content = expand_macro(content)
     latex_blocks,layerout_blocks = process_latex_content(content,False,args.color_mode)
     output = []
     errortable_path = []
     table_order = 0
+
     for key,val in latex_blocks:
         output.append(f"%vvvvvvvvvvvvvvvvvvvvvvv {key} vvvvvvvvvvvvvvvvvvvvvvvvv")
         
         if key in ['preamble','env']:
             for commend in ['title', 'author', 'address', 'section','subsection', 'subsubsection', 'chapter', 'paragraph', 'subparagraph']:
                 val = colorful_inside_brace( val,commend,colorful_fun)
-            
+            if key == 'preamble':
+                val = "\n".join(re.split(r'\n\s*\n', val))
         if key in ["text","abstract"]:
             #### 
             val = remove_affiliation_lines(val)

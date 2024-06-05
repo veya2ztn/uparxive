@@ -54,7 +54,8 @@ def read_the_tex_file_into_memory_without_comment(tex_path, use_content=False):
 
     # Apply the comment removal to each line and preserve lines that are not comments
     lines = [remove_comments(line) for line in lines]
-    return lines
+
+    return lines 
 
 def match_nested_braces(s):
     """Match content within nested braces."""

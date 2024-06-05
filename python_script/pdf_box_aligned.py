@@ -7,7 +7,7 @@ from uparxive.batch_run_utils import obtain_processed_filelist, process_files,sa
 from uparxive.lougat.markdown_pdf_align import deal_with_one_pdf_file_wrapper, MarkdownPDFalignedConfig
 from simple_parsing import ArgumentParser
 import os
-
+import albumentations
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_arguments(MarkdownPDFalignedConfig, dest="config")
