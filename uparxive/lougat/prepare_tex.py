@@ -367,18 +367,18 @@ def env_partition(content):
 
 
 
-def parse_newcommand(latex_content, command=r'\\newcommand'):
+def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
     # Pattern to extract command name, optional parameters
-    pattern = re.compile(command+r'(?:{\\(\w+)}|\\(\w+))(\[\d+\])?')
+    pattern = re.compile(command+r'(?:{\\(\w+)}|\\(\w+))(\[\d+\]|#\d)?')
     
     # Find the match for the initial part (name and optional parameters)
     match = pattern.search(latex_content)
     if not match:
-        return None  # No valid \newcommand found
+        return commands  # No valid \newcommand found
 
     # Extract command name and number of parameters
     command_name = match.group(1) if match.group(1) else match.group(2)
-    num_params   = int(match.group(3).strip('[]')) if match.group(3) else None
+    num_params   = int(match.group(3).strip('[]#')) if match.group(3) else None
     
     # Remove the matched content to leave behind the definition
     # Calculate the start of the definition by adding the length of the matched part to its start index
@@ -386,26 +386,38 @@ def parse_newcommand(latex_content, command=r'\\newcommand'):
     definition = latex_content[start_of_definition:].strip()
 
     # Assuming the definition is correctly enclosed in braces, extract the content within the first level of braces
-    if definition.startswith('{') and definition.endswith('}'):
-        definition = definition[1:-1]  # Remove the outermost braces
+    brace_counts = {'curly': 0, 'square': 0, 'round': 0}
+    definition = definition #[1:-1]  # definition must start with '{' and end with '}'
+    assert definition[0] == '{', f"you get a defination = {definition} from {latex_content}"
+    for i in range(len(definition)):
+        if definition[i] =='{':
+            brace_counts['curly'] += 1
+        elif definition[i] == '}':
+            brace_counts['curly'] -= 1
+        if brace_counts['curly'] == 0:
+            
+            break
+    definition = definition[:i+1]
 
-    return {r"\\"+command_name: {
+    definition = apply_macros(definition, commands)
+    
+    return commands|{r"\\"+command_name: {
         "params": num_params,
         "definition": definition
     }}
 
 
-def parse_redefine(commands_str):
-    commands = {}
+def parse_redefine(commands_str,commands = {}):
+    
     lines = commands_str.strip().splitlines()
     for line in lines:
+        #print(line)
         if line.startswith('\\newcommand'):
-            command = parse_newcommand(line,r'\\newcommand')
-            if command is not None:commands = commands|command
+            commands = parse_newcommand(line,r'\\newcommand',commands = commands)
+
         elif line.startswith('\\def'):
-   
-            command = parse_newcommand(line,r'\\def')
-            if command is not None:commands = commands|command
+            commands = parse_newcommand(line,r'\\newcommand',commands = commands)
+    
     return commands
 
 
@@ -450,16 +462,16 @@ def expand_macro(contents):
                             '\\renewcommand'
                             ]
     new_latex_blocks = []
-    commands = None
+    commands = {}
     for _type, content in latex_blocks:
         if _type == 'preamble':
-            assert commands is None
+            assert commands is {}
             for cmd in redefine_commands:
                 content = content.replace(cmd,"\n"+cmd)
             
             _, command_str, _ =  filter_out_preamble_block(content,redefine_commands = redefine_commands,layout_commands = [] )
             #print(command_str)
-            commands = parse_redefine(command_str)
+            commands = parse_redefine(command_str,commands)
             
         elif commands: ### <--- may cause unexcep error when replace math
             content = apply_macros(content,commands)
@@ -494,7 +506,7 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
     for block_type, block_content in latex_blocks:
         _, command_line,_ = filter_out_preamble_block(block_content,redefine_commands=redefine_commands, layout_commands=layout_commands,end=" ")
 
-        commands = commands | parse_redefine(command_line)
+        commands = parse_redefine(command_line,commands)
         # for a,b  in commands.items():
         #     print(a)
         #     print(b)
@@ -757,7 +769,7 @@ def remove_inside_brace(content, commend,colorful_fun ):
 
 def lets_deal_with_text_in_math(val):
     # Define the regex pattern to match \text{...} or \mbox{...}
-    pattern = r'\\(text|mbox)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+    pattern = r'\\(text|mbox|hbox)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
     
     # Replacement function that processes the match
     def replacement(m):

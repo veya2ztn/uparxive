@@ -211,7 +211,7 @@ import traceback
 def colored_text_math(math_latex):
     """
     Know Error Case
-    - there is $\text{$math$}$ in the math code, which will cause error
+    - there is $\text{$math$}$ in the math code, which will cause error. same as \\hbox \\mbox
     - there is [a,b) or (c,d] to represent the range of an intervel, will cause no closure error.
     
     """
@@ -221,7 +221,7 @@ def colored_text_math(math_latex):
     try:
         return try_tex_soup_parser(math_latex1)
     except:
-        #print(f'fail for math code: ===> ', math_latex)
+        print(f'fail for math code: ===> ', math_latex)
         try:
             math_latex1 = replace_intervals(math_latex1)
             
