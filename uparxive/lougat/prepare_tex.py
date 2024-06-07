@@ -87,11 +87,12 @@ def clean_latex_content(content):
         #r'%.*?\n',  # Remove comments
         r'\\hspace(\{(?:[^{}]++|(?1))*\})',
         r'\\href(\{(?:[^{}]++|(?1))*\})',
-        r'\\affiliation(\{(?:[^{}]++|(?1))*\})',
+        r'\\email(\{(?:[^{}]++|(?1))*\})',
+        #r'\\affiliation(\{(?:[^{}]++|(?1))*\})',
         r'\\newline',
         r'\\newpage',
         r'\\pagebreak',
-        r'\\footnote(\{(?:[^{}]++|(?1))*\})',
+        #r'\\footnote(\{(?:[^{}]++|(?1))*\})',
     ]
 
     # Remove standard patterns
@@ -138,9 +139,11 @@ def replace_ref(content, reference_map):
 
     return content
 
-def filter_out_preamble_block(content, redefine_commands=None, layout_commands=None):
+def filter_out_preamble_block(content, redefine_commands=None, layout_commands=None, end="\n"):
     assert redefine_commands is not None
     assert layout_commands is not None
+    for cmd in redefine_commands:
+        content = content.replace(cmd,"\n"+cmd)
     included_commands = redefine_commands + layout_commands
     brace_counts = {'curly': 0, 'square': 0, 'round': 0}
     
@@ -153,8 +156,8 @@ def filter_out_preamble_block(content, redefine_commands=None, layout_commands=N
     # Define commands to exclude from commenting
     
     
-    lines = [line for line in content.splitlines(True) if  line.strip()]
-
+    lines = [re.sub(r"%.*", "", line) for line in content.splitlines(True) if  line.strip()]
+    lines = [line for line in lines if  line.strip()]
     elements =[]
     preamble_block=[]
     layerout_block=[]
@@ -187,7 +190,7 @@ def filter_out_preamble_block(content, redefine_commands=None, layout_commands=N
                 in_command = f"end_of_comment.{in_command}"
         #print(brace_counts)
         # Add line to commented_content
-        element += line.rstrip('\n') + '\n'
+        element += line.rstrip('\n') + end
 
         if in_command.startswith("end_of_comment"):
             COMMENTQ=not in_command.endswith('donot_comment')
@@ -240,7 +243,7 @@ def blockwise_content(content, blocks= [
         (r'\\begin{abstract}.*?\\end{abstract}', 'abstract'),
         (r'\\begin{fig.*?\\end{fig.*?}', 'figure'),
         (r'\\begin{table.*?\\end{table.*?}', 'table'),
-        
+        (r'\\begin{algorithm.*?\\end{algorithm.*?}', 'algorithm'),
         #(r'\\begin{center.*?\\end{center.*?}', 'center'),
         (r'\\begin{thebibliography.*?\\end{thebibliography.*?}', 'thebibliography'),
         (r'\\begin{equation.*?\\end{equation.*?}', 'equation'),
@@ -364,44 +367,45 @@ def env_partition(content):
 
 
 
-def parse_newcommand(line):
-   
-    # Initialize variables
-    command_name = None
-    num_params = None
-    definition = None
+def parse_newcommand(latex_content, command=r'\\newcommand'):
+    # Pattern to extract command name, optional parameters
+    pattern = re.compile(command+r'(?:{\\(\w+)}|\\(\w+))(\[\d+\])?')
+    
+    # Find the match for the initial part (name and optional parameters)
+    match = pattern.search(latex_content)
+    if not match:
+        return None  # No valid \newcommand found
 
-    # Extract the command name
-    start_idx = line.find('{\\') + 2
-    end_idx = line.find('}', start_idx)
-    if start_idx > 1 and end_idx != -1:
-        command_name = '\\' + line[start_idx:end_idx]
+    # Extract command name and number of parameters
+    command_name = match.group(1) if match.group(1) else match.group(2)
+    num_params   = int(match.group(3).strip('[]')) if match.group(3) else None
+    
+    # Remove the matched content to leave behind the definition
+    # Calculate the start of the definition by adding the length of the matched part to its start index
+    start_of_definition = match.end()
+    definition = latex_content[start_of_definition:].strip()
 
-    # Check for optional parameters
-    param_idx = line.find('[', end_idx)
-    if param_idx != -1:
-        end_param_idx = line.find(']', param_idx)
-        if end_param_idx != -1:
-            num_params = int(line[param_idx+1:end_param_idx])
+    # Assuming the definition is correctly enclosed in braces, extract the content within the first level of braces
+    if definition.startswith('{') and definition.endswith('}'):
+        definition = definition[1:-1]  # Remove the outermost braces
 
-    # Extract the definition
-    start_def_idx = line.find('{', end_idx + 1) + 1
-    end_def_idx = line.rfind('}')
-    if start_def_idx > 0 and end_def_idx != -1:
-        definition = line[start_def_idx:end_def_idx]
+    return {r"\\"+command_name: {
+        "params": num_params,
+        "definition": definition
+    }}
 
-    return {command_name:{
-            "params": num_params,
-            "definition": definition
-        }}
 
 def parse_redefine(commands_str):
     commands = {}
     lines = commands_str.strip().splitlines()
     for line in lines:
         if line.startswith('\\newcommand'):
-            command = parse_newcommand(line)
-            commands = commands|command
+            command = parse_newcommand(line,r'\\newcommand')
+            if command is not None:commands = commands|command
+        elif line.startswith('\\def'):
+   
+            command = parse_newcommand(line,r'\\def')
+            if command is not None:commands = commands|command
     return commands
 
 
@@ -413,8 +417,8 @@ def apply_macros(latex_text, commands):
         if details['definition'] is None:continue
         if details['params'] is None:
             # Direct replacement if there are no parameters
-            pattern = "\\" + command + r'(?=\s|\Z)'
-
+            pattern = regex.escape(command[1:]) + r'(?=\s|\Z|\\|\_|\^|\}|\]|\)|\$)'
+            #print(pattern,details['definition'])
             latex_text = re.sub(pattern, details['definition'].replace("\\", "\\\\"), latex_text)
         else:
             
@@ -431,25 +435,29 @@ def apply_macros(latex_text, commands):
             
             # Create a regex pattern that matches this command followed by its parameters in nested braces
             brace_pattern = r'(\{(?:[^{}]++|(?1))*\})'
-            full_pattern  = "\\" + command + brace_pattern * details['params']
+            full_pattern  = regex.escape(command[1:]) + brace_pattern * details['params']
             latex_text    = regex.sub(full_pattern, replacer, latex_text)
     
     return latex_text
 
 def expand_macro(contents):
     latex_blocks = blockwise_content(contents, blocks=[(r'\\documentclass.*?\\begin{document}', 'preamble')])
-    new_latex_blocks = []
-    commands = None
-    for _type, content in latex_blocks:
-        if _type == 'preamble':
-            assert commands is None
-            _, command_str, _ =  filter_out_preamble_block(content,redefine_commands = ['\\def','\\Declare', '\\define',
+    redefine_commands = ['\\def','\\Declare', '\\define',
                             '\\newcommand', '\\let',
                             '\\def',
                             '\\newtheorem',
                             '\\providecommand',
                             '\\renewcommand'
-                            ],layout_commands = [] )
+                            ]
+    new_latex_blocks = []
+    commands = None
+    for _type, content in latex_blocks:
+        if _type == 'preamble':
+            assert commands is None
+            for cmd in redefine_commands:
+                content = content.replace(cmd,"\n"+cmd)
+            
+            _, command_str, _ =  filter_out_preamble_block(content,redefine_commands = redefine_commands,layout_commands = [] )
             #print(command_str)
             commands = parse_redefine(command_str)
             
@@ -472,7 +480,7 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
                          '\\renewcommand', 
                          '\\documentclass',"\\global"
                         ]
-    relative_layout_commands = ['\\setlength','\\newcolumntype']
+    relative_layout_commands = ['\\setlength','\\newcolumntype','\\SetArgSty']
     layout_commands = ['\\input','\\twocolumn',"\\if","\\fi"] + relative_layout_commands
  
 
@@ -482,51 +490,34 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
     preamble_content = [""]
     layerout_blocks  = []
     new_blocks = []
+    commands={}
+    for block_type, block_content in latex_blocks:
+        _, command_line,_ = filter_out_preamble_block(block_content,redefine_commands=redefine_commands, layout_commands=layout_commands,end=" ")
 
-    if collect_preamble:
-        for block_type, block_content in latex_blocks:
-            if block_type == 'preamble':
-                preamble_content  =  block_content.split('\n')
-            elif block_type == 'text':
-                # Find and move commands to preamble
-                
-                new_block_content, command_line,layerout_block = filter_out_preamble_block(block_content,
-                                                                            redefine_commands=redefine_commands, 
-                                                                            layout_commands=layout_commands)
-                
-                layerout_block = [t for t in layerout_block if any([t.strip().startswith(cmd) for cmd in relative_layout_commands])]
-                layerout_blocks.extend(layerout_block)
-                if command_line.strip():
-                    preamble_content.insert(-1,command_line)
-                if new_block_content.strip():
-                    new_blocks.append([block_type, new_block_content.strip()])
-            else:
-                new_blocks.append([block_type, block_content])
-
-            preamble_content = "\n".join(preamble_content)
+        commands = commands | parse_redefine(command_line)
+        # for a,b  in commands.items():
+        #     print(a)
+        #     print(b)
+        # raise
+        new_block_content = block_content
+        if block_type == 'preamble':
+            block_content = block_content.split('\n')
+            block_content.insert(-1,r"\usepackage[most]{tcolorbox}")
+            ## below for color board for colorfbox
+            #block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{ \\fboxsep=0pt \\fboxrule=1pt \\extractRGB{#2} \\fbox{\\colorbox{#1}{\\strut #3}}}""")
+            ## below for color backgroud for colorfbox
+            block_content.insert(-1,"""\\newcommand{\\extractRGB}[1]{\\def\\tempa##1,##2,##3\\end{\\definecolor{tempbordercolor}{RGB}{##1,##2,##3} \\color{tempbordercolor}  }\\expandafter\\tempa#1\\end}""")
             
-            # Add updated preamble to the new blocks list
-            new_blocks.insert(0, ['preamble', preamble_content.strip()])
-    else:
-        for block_type, block_content in latex_blocks:
-            new_block_content = block_content
-            if block_type == 'preamble':
-                block_content = block_content.split('\n')
-                block_content.insert(-1,r"\usepackage[most]{tcolorbox}")
-                ## below for color board for colorfbox
-                #block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{ \\fboxsep=0pt \\fboxrule=1pt \\extractRGB{#2} \\fbox{\\colorbox{#1}{\\strut #3}}}""")
-                ## below for color backgroud for colorfbox
-                block_content.insert(-1,"""\\newcommand{\\extractRGB}[1]{\\def\\tempa##1,##2,##3\\end{\\definecolor{tempbordercolor}{RGB}{##1,##2,##3} \\color{tempbordercolor}  }\\expandafter\\tempa#1\\end}""")
-                
-                if color_mode == 'colorful_table_figure':
-                    block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{\\definecolor{bgcolor}{RGB}{#2} \\fboxsep=0pt \\fboxrule=0pt \\color{bgcolor} \\fbox{\\colorbox{bgcolor}{\\strut #3}}}""")
-                elif color_mode == 'virtual_box_table_figure':
-                    block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{\\definecolor{bgcolor}{RGB}{255,255,255} \\fboxsep=0pt \\fboxrule=0pt  \\fbox{\\colorbox{bgcolor}{\\strut #3}}}""")
-                
-                
-                new_block_content = "\n".join(block_content)
+            if color_mode == 'colorful_table_figure':
+                block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{\\definecolor{bgcolor}{RGB}{#2} \\fboxsep=0pt \\fboxrule=0pt \\color{bgcolor} \\fbox{\\colorbox{bgcolor}{\\strut #3}}}""")
+            elif color_mode == 'virtual_box_table_figure':
+                block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{\\definecolor{bgcolor}{RGB}{255,255,255} \\fboxsep=0pt \\fboxrule=0pt  \\fbox{\\colorbox{bgcolor}{\\strut #3}}}""")
+            new_block_content = "\n".join(block_content)
+            new_blocks.append([block_type, new_block_content])
+        
+        else:
+            block_content = apply_macros(block_content, commands)
             if block_type == 'text':
-                
                 ##Find the defination commend and add prefix on them
                 # new_block_content, command_line,layerout_block = filter_out_preamble_block(block_content,
                 #                                                                 redefine_commands=[], 
@@ -536,10 +527,11 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
                 #                                                                 ])
                 envs_blocks = env_partition(block_content)
                 new_blocks.extend(envs_blocks)
-                continue
                 
-                pass
-            new_blocks.append([block_type, new_block_content])
+            else:
+                new_blocks.append([block_type, block_content])
+
+        
     return new_blocks,layerout_blocks
 
 def convert_pdf_to_img(pdf_file, dpi=300):
@@ -682,148 +674,6 @@ def remove_affiliation_lines(text):
     result_text = '\n'.join(filtered_lines)
     return result_text
 
-def formularize_latex_old(file_path, colorful_fun,force_redo=False):
-    reference_map_path = os.path.join(os.path.dirname(file_path),'uparxive',"reference_map.json")
-    with open(reference_map_path,'r') as f:
-        reference_map = json.load(reference_map_path)
-
-    force_redo = False
-    content = read_content_with_input(file_path)
-    lines_without_comments = read_the_tex_file_into_memory_without_comment(content, use_content=True)
-    lines_without_comments = [line for line in lines_without_comments if line]
-    content = "".join(lines_without_comments)
-    
-    content = replace_ref(content, reference_map=reference_map)
-    return [], content
-    latex_blocks,layerout_blocks = process_latex_content(content)
-    whole_preamble = latex_blocks[0][1].split('\n')
-    whole_preamble.insert(-1,"\n".join(layerout_blocks))
-    whole_preamble.insert(-1,r'\pagestyle{empty}')
-    whole_preamble = "\n".join(whole_preamble)
-    output = []
-    errortable_path = []
-    table_order = 0
-    for key,val in latex_blocks:
-        output.append(f"%vvvvvvvvvvvvvvvvvvvvvvv {key} vvvvvvvvvvvvvvvvvvvvvvvvv")
-  
-        if key in ["text","abstract"]:
-            #val   = clean_latex_content(val.strip())
-            
-            lines = format_latex_content(val)
-            lines = [better_latex_sentense_string(line) for line in lines]
-
-            new_lines = []
-            for line in lines:
-                if line.lstrip().startswith('%%-->layerout<--%%'):
-                    new_lines.append(line.replace('%%-->layerout<--%%',''))
-                elif line.lstrip().startswith('%'):
-                    new_lines.append(line)
-                else:
-                    new_lines.append(colorful_fun(line))
-            val = "\n\n".join(new_lines)
-        # if key in ['table']:
-        #     tabledir  = os.path.dirname(file_path)
-        #     tablename = f"temerary_table_{table_order}"
-        #     tablepath = os.path.join(tabledir, f"{tablename}.tex")
-        #     pdf_file  = os.path.join(tabledir,'temp',f"{tablename}.pdf")
-        #     img_dir   = os.path.join(tabledir,'figures')
-        #     os.makedirs(img_dir, exist_ok=True)
-        #     img_file = os.path.join(img_dir,f"{tablename}.png")
-        #     table_order+=1
-            
-        #     if is_comprehensive_table(val):
-                
-        #         remain_content,caption_block,_  = filter_out_preamble_block(val, redefine_commands=["\\caption"],  layout_commands=[])
-                
-        #         #single_table_tex_file = better_document_class(whole_preamble)+ '\n' + remain_content + "\n" +r"\end{document}"
-        #         single_table_tex_file = whole_preamble + '\n' + remain_content + "\n" +r"\end{document}"
-        #         # if not os.path.exists(tablepath) or force_redo:
-        #         #     with open(tablepath,'w') as ft:
-        #         #         ft.write(single_table_tex_file)
-        #         #     #print(single_table_tex_file)
-                
-        #         # if (not os.path.exists(pdf_file) and os.path.exists(tablepath)) or force_redo:
-        #         #     process = subprocess.Popen(["latexmk", "-synctex=0","-interaction=nonstopmode","-file-line-error","-pdf","-f","-outdir=temp","-cd" , tablepath],
-        #         #             stdout=subprocess.PIPE,
-        #         #             stderr=subprocess.STDOUT,
-        #         #             text=True
-        #         #             )
-        #         #     while True:
-        #         #         line = process.stdout.readline()
-                        
-        #         #         if not line:  # If readline returns an empty bytes object, the process has finished
-        #         #             break
-        #         #         decoded_line = line#.decode('utf-8')
-        #         #         #print(decoded_line, end='')  # Print the output in real-time
-        #         # if (not os.path.exists(img_file) and os.path.exists(pdf_file)) or force_redo:
-        #         #     images = convert_pdf_to_img(pdf_file)
-        #         #     assert len(images)>0
-        #         #     cropped_image = trim(images[0])
-        #         #     cropped_image.save(img_file)
-        #         if not os.path.exists(img_file): 
-        #             errortable_path.append(tablepath)
-        #             val = None
-        #         else:
-        #             if r"\begin{table*}" in val:
-        #                 val = r"""
-        #                         \begin{table*}[ht]
-        #                             \begin{center}
-        #                                 \includegraphics[width=1.0\linewidth]{"""+os.path.relpath(img_file, start=tabledir)+r"""}
-        #                             \end{center}
-        #                         """ + caption_block + r"""
-        #                         \end{table*}
-        #                         """
-        #             else:
-        #                 val = r"""
-        #                         \begin{table}[ht]
-        #                             \begin{center}
-        #                                 \includegraphics[width=1.0\linewidth]{"""+os.path.relpath(img_file, start=tabledir)+r"""}
-        #                             \end{center}
-        #                         """ + caption_block + r"""
-        #                         \end{table}
-        #                         """
-            
-        #     if val is not None:
-        #         ### colorful only the conetent in tabular and cation.
-        #         blockwised_table_string = blockwise_content(val, [(r'\\begin{tabular}.*?\\end{tabular}', 'tabular')])
-        #         tablelines =[]
-        #         for tk,tv in blockwised_table_string:
-        #             if tk == 'tabular':
-        #                 tv = tv.split('\n')
-        #                 firstline = tv[0].strip()
-        #                 parameter, remain_content = split_on_first_closure(firstline.strip().replace(r"\begin{tabular}",""))
-        #                 remain_content = remain_content+'\n'+'\n'.join(tv[1:])
-        #                 remain_content = colorful_fun(remain_content).replace(r"\end{tabular}","\n"+r"\end{tabular}")
-        #                 tv = r"\begin{tabular}" + parameter + "\n" + remain_content
-        #             tablelines.append(tv)
-        #         val = "\n".join(tablelines)
-        #     else:
-        #         val = f"%Error in processing table {tablepath}"
-
-            
-        # if key in ['figure','table']: ### for caption
-        #     #val = re.sub(r'\\includegraphics(\[.*?\])?\{(.+?)\}', replace_function, val)
-            
-        #     formatted_string = filter_out_preamble_block(val, [], ["\\caption"])[0]
-        #     newlines =[]
-        #     for line in formatted_string.split('\n'):
-        #         if line.startswith('%%-->layerout<--%%'):
-        #             line = line.replace('%%-->layerout<--%%',"")
-        #             line = colorful_fun(better_latex_sentense_string(clean_latex_content(line)))
-        #         elif line.startswith('%'):continue
-        #         newlines.append(line)
-        #     val = "\n".join(newlines)
-        # if key in ['section','chapter','subsection','subsubsection']:
-        #     val = colorful_fun(val)
-        # if key in ['equation']:
-        #     val = replace_equation_content(val) if colorful_fun!=identity else val
-        # if key in ['thebibliography']:
-        #     val = ""
-        output.append(val)
-        output.append(f"%^^^^^^^^^^^^^^^^^^^^^^^ {key} ^^^^^^^^^^^^^^^^^^^^^^^^^")
-    
-    return errortable_path, "\n".join(output)
-
 
 def get_pdf_path(path):
     aaa = path.lower()
@@ -905,10 +755,25 @@ def colorful_inside_brace(content, commend,colorful_fun ):
 def remove_inside_brace(content, commend,colorful_fun ):
     return regex.sub(r'\\'+commend+r'(\{(?:[^{}]++|(?1))*\})',   "",  content, flags=regex.DOTALL)
 
+def lets_deal_with_text_in_math(val):
+    # Define the regex pattern to match \text{...} or \mbox{...}
+    pattern = r'\\(text|mbox)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+    
+    # Replacement function that processes the match
+    def replacement(m):
+        # m[1] will be either "text" or "mbox"
+        # m[2] contains the content inside the brackets
+        inner_content = m[2].replace("$", "<dollarsign>")
+        return f"\\{m[1]}{{{inner_content}}}"
+
+    # Perform the substitution
+    val = re.sub(pattern, replacement, val, flags=re.DOTALL)
+    return val
 
 def deal_with_one_block_with_math(val, colorful_fun):
     new_val = []
-    string_and_math_blocks = blockwise_content(val, blocks=[(r'\$.*?\$', 'math')])
+    val = lets_deal_with_text_in_math(val) # in case for those $\text{$d$ }$
+    string_and_math_blocks = blockwise_content(val, blocks=[(r'(?<!\\)\$.*?(?<!\\)\$', 'math')])
     for block_type, block_content in string_and_math_blocks:
         if block_type == 'math':
             if colorful_fun != identity:
@@ -925,6 +790,7 @@ def deal_with_one_block_with_math(val, colorful_fun):
                 else:
                     new_lines.append(colorful_fun(line))
             block_content = "\n\n".join(new_lines)
+        block_content = block_content.replace("<dollarsign>","$")
         new_val.append(block_content)
     return " ".join(new_val)
 
@@ -1012,7 +878,7 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
         content = remove_the_bib(content)
     #content = expand_newcommand_in_latex(content)
     content = content.replace("\\tableofcontents", "") ### we can not handle content
-    content = expand_macro(content)
+    #content = expand_macro(content)
     latex_blocks,layerout_blocks = process_latex_content(content,False,args.color_mode)
     output = []
     errortable_path = []
@@ -1028,9 +894,10 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
                 val = "\n".join(re.split(r'\n\s*\n', val))
         if key in ["text","abstract"]:
             #### 
-            val = remove_affiliation_lines(val)
+            
             val = val.replace("\\item","\n\\item")
             val = deal_with_one_block_with_math(val, colorful_fun)
+            val = remove_affiliation_lines(val)
         if key in ['table']:
             if not args.try_color_table or is_comprehensive_table(val):
                 val, captions = remove_out_the_caption(val)
@@ -1062,14 +929,22 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
             val = colorful_fun(val)
         if key in ['equation']:
             #val = colorful_fun(val)
+            ### should remove whole the empty line in equation
+            val = val.splitlines()
+            val = [t.strip() for t in val if len(t.strip())>0]
+            val = "\n".join(val)
             val = colored_word(val) if colorful_fun!=identity else val #replace_equation_content(val) if colorful_fun!=identity else val
             #val = add_color_box(val) if colorful_fun!=identity else val 
         if key in ['thebibliography']:
             ### use re split by \bibitem
             lines = []
             for line in  re.split(r'(?=\\bibitem)', val):
-                line = better_latex_sentense_string(clean_latex_content(line))
-                line = colorful_fun(line)
+                if '\\bibitem' in line:
+                    #line = better_latex_sentense_string(clean_latex_content(line))
+                    #line = colorful_fun(line)
+                    line = deal_with_one_block_with_math(line, colorful_fun)
+
+                
                 lines.append(line)
            
             val = "\n".join(lines)

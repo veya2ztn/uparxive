@@ -116,12 +116,13 @@ mathfunction = [
 
 import latex2mathml.commands as commands
 from TexSoup.utils import Token
-from TexSoup.data import BraceGroup,TexCmd,TexArgs
+from TexSoup.data import BraceGroup,TexCmd,TexArgs,BracketGroup,TexNamedEnv
 from TexSoup import TexSoup
 default_use_adjoint_char_math_func = set(commands.COMMANDS_WITH_ONE_PARAMETER)|set(commands.LOCAL_FONTS.keys())
 single_char_math_symbol = MATH
 
 def deal_with_one_envs(elements):
+    
     string_list = []
     i=0
     while i < len(elements):
@@ -132,7 +133,7 @@ def deal_with_one_envs(elements):
             continue
         if  isinstance(element, Token):
             string_list.append(colored_text(element.text))
-        elif isinstance(element, BraceGroup):
+        elif isinstance(element, (BraceGroup,BracketGroup,TexNamedEnv)):
             element.contents = deal_with_one_envs(element.contents)
             string_list.append(str(element))
         elif isinstance(element, TexCmd):
@@ -141,7 +142,7 @@ def deal_with_one_envs(elements):
                 if len(element.args)==0:
                     ## then we should take the first part from followed 
                     if i == len(elements) - 1:
-                        raise NotImplementedError(f"may better remove the part ")
+                        raise NotImplementedError(f"may better remove the part: {element} of {elements}")
 
                     if  isinstance(elements[i+1], Token):
                         text=elements[i+1].text.strip()
@@ -172,29 +173,67 @@ def deal_with_one_envs(elements):
                 string_list.append(colored_word(str(element)))
             else:
                 string_list.append(str(element))
-                
+        
         else:           
                     
             raise NotImplementedError(f"UnKnow TexSoup Type:{type(element)}")
         i+=1
   
     return string_list
+import re
 
+def custom_replace(match):
+    # This function will be called for each match
+    text = match.group(0)
+    if text.startswith('[') and text.endswith(')'):
+        # Replace [ and ) in left-closed, right-open intervals
+        text = text.replace('[', 'leftbracket').replace(')', 'rightbrace')
+    elif text.startswith('(') and text.endswith(']'):
+        # Replace ( and ] in left-open, right-closed intervals
+        text = text.replace('(', 'leftbrace').replace(']', 'rightbracket')
+    return text
 
-def colored_text_math(math_latex):
-    #print(f"we deal with => {math_latex}  =>" , end=' ')
-    math_latex = math_latex.strip("$")
-    try:
-        soup = TexSoup("$"+math_latex+"$")
-    except:
-        print(f'fail for math code:')
-        print(math_latex)
-        raise
+def replace_intervals(text):
+    # Regex to find both types of intervals
+    interval_pattern = r'\[.*?,\s*?.*?\)|\(.*?,\s*?.*?\]'
+    # Perform the substitution
+    modified_text = re.sub(interval_pattern, custom_replace, text)
+    return modified_text
+
+def try_tex_soup_parser(text):
+    soup = TexSoup("$"+text+"$")
     elements = soup.expr.all[0].contents
     result =  "".join(deal_with_one_envs(elements))
     #print(result)
+    result = result.replace('<dollarsign>',r'\$')
     return "$" + result + "$"
-
+import traceback
+def colored_text_math(math_latex):
+    """
+    Know Error Case
+    - there is $\text{$math$}$ in the math code, which will cause error
+    - there is [a,b) or (c,d] to represent the range of an intervel, will cause no closure error.
+    
+    """
+    #print(f"we deal with => {math_latex}  =>" , end=' ')
+    math_latex1 = math_latex.strip("$")
+    math_latex1 = math_latex1.replace(r'\$', '<dollarsign>')
+    try:
+        return try_tex_soup_parser(math_latex1)
+    except:
+        #print(f'fail for math code: ===> ', math_latex)
+        try:
+            math_latex1 = replace_intervals(math_latex1)
+            
+            result = try_tex_soup_parser(math_latex1)
+            result = result.replace('leftbracket','[').replace('rightbrace',')').replace('leftbrace','(').replace('rightbracket',']')
+            return result
+        except:
+            #traceback.print_exc()
+            #print(f"fail for all attempt. code: ===> ", math_latex)
+            raise
+        return colored_text_math_old(math_latex)
+        
 def colored_text_math_old(text):
     # LaTeX commands to look for
     text = encapsulate_command_arguments(text)
@@ -355,6 +394,7 @@ def treat_seg(seg):
 
 from tqdm.auto import tqdm
 def colored_text(text, end='\n'):    
+    text = text.replace('<dollarsign>','$')
     if len(text.strip())==0:return text
     texts = [seg for seg in re.split(r'(\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\})+)|\s', text) if seg]  # 使用\tag[]{}或\tag{}或空白符将句子分为单词，括号内不会被切分
     new_text = []
