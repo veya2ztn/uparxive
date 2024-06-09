@@ -221,7 +221,7 @@ def colored_text_math(math_latex):
     try:
         return try_tex_soup_parser(math_latex1)
     except:
-        print(f'fail for math code: ===> ', math_latex)
+        #print(f'fail for math code: ===> ', math_latex)
         try:
             math_latex1 = replace_intervals(math_latex1)
             
@@ -231,8 +231,8 @@ def colored_text_math(math_latex):
         except:
             #traceback.print_exc()
             #print(f"fail for all attempt. code: ===> ", math_latex)
-            raise
-        return colored_text_math_old(math_latex)
+            #raise
+            return colored_text_math_old(math_latex)
         
 def colored_text_math_old(text):
     # LaTeX commands to look for

@@ -244,12 +244,14 @@ def blockwise_content(content, blocks= [
         (r'\\begin{fig.*?\\end{fig.*?}', 'figure'),
         (r'\\begin{table.*?\\end{table.*?}', 'table'),
         (r'\\begin{algorithm.*?\\end{algorithm.*?}', 'algorithm'),
+        (r'\\begin{Verbatim.*?\\end{Verbatim.*?}', 'Verbatim'),
+        
         #(r'\\begin{center.*?\\end{center.*?}', 'center'),
         (r'\\begin{thebibliography.*?\\end{thebibliography.*?}', 'thebibliography'),
         (r'\\begin{equation.*?\\end{equation.*?}', 'equation'),
         (r'\\begin{eqnarray.*?\\end{eqnarray.*?}', 'equation'),
         (r'\\\[.*?\\\]', 'equation'),
-        (r'\$\$.*?\$\$', 'equation'),
+        (r'\n\$\$.*?\$\$', 'equation'),
         (r'\\begin{align.*?\\end{align.*?}', 'equation'),
         (r'\\begin{multline.*?\\end{multline.*?}', 'equation'),
 
@@ -314,7 +316,7 @@ def env_partition(content):
         '\\subsubsection', '\\chapter', '\\paragraph', '\\subparagraph',
         '\\def','\\Declare', '\\define',
         '\\newcommand', '\\let',
-        '\\def', '\\usepackage',
+        '\\def', '\\usepackage', "\\affiliation",
         '\\eqnobysec','\\newenvironment',
         '\\newtheorem',
         '\\providecommand',
@@ -366,10 +368,47 @@ def env_partition(content):
     return elements
 
 
+def parse_def(latex_content, commands={}):
+    # Pattern to extract \def command
+    pattern = re.compile(r'\\def\\(\w+)([^\{]*)\{([^\}]*)\}')
+    
+    # Search for matches
+    matches = pattern.finditer(latex_content)
+    for match in matches:
+        command_name = match.group(1)
+        parameter_part = match.group(2)
+        definition = match.group(3)
 
-def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
+        # Parse parameters from the parameter part
+        num_params = 0
+        params_pattern = re.compile(r'#(\d+)')
+        params = params_pattern.findall(parameter_part)
+        if params:
+            num_params = max(map(int, params))  # Get the highest parameter number used
+        
+        def replace_param_dollars(match):
+            # Extract the full match which includes the dollar signs and parameters
+            full_match = match.group(0)
+            # Replace starting and ending dollar signs
+            replaced = re.sub(r'^\$', '<dollarsign>', full_match)
+            replaced = re.sub(r'\$$', '<dollarsign>', replaced)
+            return replaced
+
+        # Apply the replacement to the definition
+        param_regex = r'\$(#\d+)+\$'
+        definition = re.sub(param_regex, replace_param_dollars, definition)
+        # Store command in dictionary
+        command = {f"\\{command_name}" :{
+            "params": num_params,
+            "definition": definition
+        }}
+        commands = commands|command
+        #print(command)
+
+    return commands
+def parse_newcommand_old(latex_content, command=r'\\newcommand', commands={}):
     # Pattern to extract command name, optional parameters
-    pattern = re.compile(command+r'(?:{\\(\w+)}|\\(\w+))(\[\d+\]|#\d)?')
+    pattern = re.compile(command+r'(?:{\\(\w+)}|\\(\w+))(\[\d+\])?')
     
     # Find the match for the initial part (name and optional parameters)
     match = pattern.search(latex_content)
@@ -378,7 +417,7 @@ def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
 
     # Extract command name and number of parameters
     command_name = match.group(1) if match.group(1) else match.group(2)
-    num_params   = int(match.group(3).strip('[]#')) if match.group(3) else None
+    num_params   = int(match.group(3).strip('[]')) if match.group(3) else None
     
     # Remove the matched content to leave behind the definition
     # Calculate the start of the definition by adding the length of the matched part to its start index
@@ -398,14 +437,75 @@ def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
             
             break
     definition = definition[:i+1]
-
-    definition = apply_macros(definition, commands)
     
+    definition = apply_macros(definition, commands)
+    def replace_param_dollars(match):
+        # Extract the full match which includes the dollar signs and parameters
+        full_match = match.group(0)
+        # Replace starting and ending dollar signs
+        replaced = re.sub(r'^\$', '<dollarsign>', full_match)
+        replaced = re.sub(r'\$$', '<dollarsign>', replaced)
+        return replaced
+
+    # Apply the replacement to the definition
+    param_regex = r'\$(#\d+)+\$'
+    definition = re.sub(param_regex, replace_param_dollars, definition)
     return commands|{r"\\"+command_name: {
         "params": num_params,
         "definition": definition
     }}
 
+import re
+
+def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
+    # Improved pattern to extract command name, optional parameters, and their default values
+    pattern = re.compile(command + r'{\\(\w+)}(\[\d+\](?:\[[^\]]+\])?)?{')
+    
+    # Find the match for the initial part (name and optional parameters)
+    match = pattern.search(latex_content)
+    if not match:
+        return commands  # No valid \newcommand found
+
+    # Extract command name
+    command_name = match.group(1)
+    
+    # Initialize parameter count and default value
+    num_params = 0
+    default_value = None
+    
+    # Check if there are optional parameters
+    if match.group(2):
+        params = match.group(2)
+        if params.count('[') == 2:
+            num_params = int(params[1:params.find(']')])
+            default_value = params[params.find('[')+1+len(str(num_params))+1:-1]
+        else:
+            num_params = int(params[1:-1])
+
+    # Calculate the start of the definition by finding the next opening brace after the pattern match
+    start_of_definition = latex_content.find('{', match.end()-1) + 1
+    end_of_definition = start_of_definition
+    brace_count = 1
+
+    # Count braces to find the corresponding closing brace
+    while end_of_definition < len(latex_content) and brace_count > 0:
+        if latex_content[end_of_definition] == '{':
+            brace_count += 1
+        elif latex_content[end_of_definition] == '}':
+            brace_count -= 1
+        end_of_definition += 1
+
+    # Extract the definition enclosed in the outermost braces
+    definition = latex_content[start_of_definition:end_of_definition-1]
+
+    # Store the command in the dictionary
+    commands[r"\\" + command_name] = {
+        "params": num_params,
+        "default": default_value,
+        "definition": definition
+    }
+
+    return commands
 
 def parse_redefine(commands_str,commands = {}):
     
@@ -416,7 +516,7 @@ def parse_redefine(commands_str,commands = {}):
             commands = parse_newcommand(line,r'\\newcommand',commands = commands)
 
         elif line.startswith('\\def'):
-            commands = parse_newcommand(line,r'\\newcommand',commands = commands)
+            commands = parse_def(line,commands = commands)
     
     return commands
 
@@ -442,6 +542,7 @@ def apply_macros(latex_text, commands):
                     param_match = match.group(i + 1)  # Get the i-th parameter group
                     # Clean and unbrace the parameter content
                     cleaned_param = param_match[1:-1] if len(param_match) > 2 else param_match
+                    
                     content = content.replace(f"#{i + 1}", cleaned_param)
                 return content
             
@@ -769,7 +870,7 @@ def remove_inside_brace(content, commend,colorful_fun ):
 
 def lets_deal_with_text_in_math(val):
     # Define the regex pattern to match \text{...} or \mbox{...}
-    pattern = r'\\(text|mbox|hbox)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+    pattern = r'\\(text|mbox|hbox|textit)\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
     
     # Replacement function that processes the match
     def replacement(m):
@@ -910,7 +1011,7 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
             val = val.replace("\\item","\n\\item")
             val = deal_with_one_block_with_math(val, colorful_fun)
             val = remove_affiliation_lines(val)
-        if key in ['table']:
+        if key in ['table','algorithm','Verbatim']:
             if not args.try_color_table or is_comprehensive_table(val):
                 val, captions = remove_out_the_caption(val)
                 val           = wrap_tables_with_tcolorbox(val)

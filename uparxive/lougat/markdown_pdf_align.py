@@ -268,23 +268,42 @@ def partition_latex_blocks(latex_input):
     return blocks
 
 def simple_math_color_format(latex_input):
-    # Partition into blocks
-    blocks = partition_latex_blocks(latex_input)
-    pattern = r'\\color\s*\[\s*rgb\s*\]\{\s*([^}]+?)\s*\}([^}]*)\}'
-    # Print the results
-    colored_text_tuple = []
-    for block in blocks:
-        match = re.search(pattern, block)
-        if not match:
-            color = None
-            colored_text_tuple.append((color,block))
-        else:
-            rgb_string, text = match.groups()
-            rgb_values = rgb_string.split(',')
-            R, G, B = (round(float(value) * 255) for value in rgb_values)
-            colored_text_tuple.append(((R, G, B), text))
-    return colored_text_tuple
+    # Pattern to match `{...}` containing `\color[rgb]{a,b,c}`
+    pattern = r'\{(\s*\\color\s*\[\s*rgb\s*\]\s*\{\s*([^}]+?)\s*\}[^}]*)\}'
+    
+    result = []
+    last_end = 0
+    
+    # Iterate through all matches
+    for match in re.finditer(pattern, latex_input):
+        start, end = match.span()
+        
+        # Add text before the match
+        if start > last_end:
+            result.append((None, latex_input[last_end:start].strip()+' ' ))
 
+        # Extract the full match and the RGB values
+        full_match = match.group(1)
+        rgb_string = match.group(2)
+        rgb_values = rgb_string.split(',')
+        R, G, B = (round(float(value) * 255) for value in rgb_values)
+        
+        # Remove the \color[rgb]{a,b,c} part from the match
+        cleaned_text = re.sub(r'\\color\s*\[\s*rgb\s*\]\s*\{\s*[^}]+\s*\}', '', full_match).strip()
+        result.append(((R, G, B), cleaned_text+' '))
+        last_end = end
+    
+    # Add remaining text after the last match
+    if last_end < len(latex_input):
+        result.append((None, latex_input[last_end:]))
+    for i in range(1, len(result)):
+        prev_line = result[i-1][1] if result[i - 1][1] else ''
+        curr_line = result[i][1]   if result[i][1]     else ''
+
+        if (prev_line.strip() and curr_line.strip()) and not (prev_line.strip()[-1].isalnum() and curr_line.strip()[0].isalnum()):
+            result[i-1] = (result[i-1][0], prev_line.rstrip())
+            result[i]   = (  result[i][0], curr_line.lstrip())
+    return result
 def blockwise_content(content, blocks):
     # Combine all block patterns into one regex
     combined_pattern = '|'.join(f'({pattern})' for pattern, _ in blocks)
@@ -366,7 +385,19 @@ def color_dct_text(line, color):
             dct_color[current_color] = buffer_text
     return dct_color
 
-def color_dct_line(line,color,keep_structure):
+class ColorManager:
+    def __init__(self):
+        self.registed_color = {}
+    def shift(self, color):
+        if color not in self.registed_color:
+            self.registed_color[color] = []
+            last_color = color
+        else:
+            last_color = self.registed_color[color][-1]
+        self.registed_color[color].append(add_rgb(last_color))
+        return self.registed_color[color][-1]
+
+def  color_dct_line(line,color,keep_structure,color_manager):
     dct_color=OrderedDict()
     blocks = blockwise_content(line,blocks= [(r'\\\(.*?\\\)', 'inline_equation') ])
     for _type, block_content in blocks:
@@ -374,72 +405,60 @@ def color_dct_line(line,color,keep_structure):
             partition = re.split(r'(\[[0-9A-Fa-f]{6}\][^\s]+|\s)', block_content.strip())
             partition = [t for t in partition if t.strip()]
             for part in partition:
-
                 if not part.strip():continue
                 part = unicode_to_latex(part)
                 res = re.match(r'\[([0-9A-Fa-f]{6})\](.*)', part)
                 if res:
                     hex_code, text = res.groups()
                     color = hex_to_rgb(hex_code)
-                    #if color not in dct_color:dct_color[color]=[]
                     if color in dct_color:
-                        #print(f"{color} => {text}")
                         if len(text.strip())>0:
                             logging.debug(f"color = {color} ==> part{part}, replicate to {dct_color[color]}")
                     else:
-                        #print(f"{i}/{length}=>{text}")
                         dct_color[color] = text 
                 else:   
+                    dct_color[color_manager.shift(color)] = part 
 
-                    # not included：对上一个color进行递增，目的是避免键的重复
-                    color = add_rgb(color)
-                    #if color not in dct_color:dct_color[color]=[]
-                    dct_color[color] = part 
         elif _type == 'inline_equation':
             block_content = block_content.strip()
-            dct_color[add_rgb(color)] = ["<inline_math>",block_content[:2]]
+            dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[:2]]
             for c,text in simple_math_color_format(block_content[2:-2]):
                 if c and c!=(0,0,0):
                     assert c not in dct_color or len(text.strip())==0, f"color should be unique {c}"
                     dct_color[c] = ["<inline_math>",text]
                     color = c
                 else:
-                    color = add_rgb(color)
-                    dct_color[color] = ["<inline_math>",text]
-            dct_color[add_rgb(color)] = ["inline_<math>",block_content[-2:]]
+                    dct_color[color_manager.shift(color)] = ["<inline_math>",text]
+            dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[-2:]]
         else:
             raise NotImplementedError(f"not implement for _type={_type}")
-        
+    
+    color = next(reversed(dct_color))
     if keep_structure:
         if isinstance(dct_color[color],str):
             dct_color[color] += "\n\n"
         # inline math does not need do \n\n
     return dct_color
 
-def   colored_dct(mmd,keep_structure=True):
+def   colored_dct(mmd,keep_structure=True,color=(0,0,0)):
     dct_color = OrderedDict()
     mmd = re.sub(r'\u2062','',mmd)  # 删除多余的不可见Unicode编码
-    # for view_symbol, latex_code in dct_greek2math.items(): ### since we have unicode_to_latex, dont need this anymore 
-    #     if view_symbol in mmd:
-    #         #print(view_symbol,'->',dct_greek2math[view_symbol]) ### markdown 
-    #         mmd = mmd.replace(view_symbol,dct_greek2math[view_symbol])
     mmd = re.sub(r'\[RGB\](\d{3}),(\d{3}),(\d{3})',"",mmd) ### <-- filter data like [RGB]111,222,333dadsa
-    
+    color_manager = ColorManager()
     assert len([t for t in re.split(r'(\[[0-9A-Fa-f]{6}\][^\s]+|\s)', mmd) if t.strip()])< 256*256*256
-    color = (0,0,0)
     block_equation_color_map = OrderedDict()
     blocks = blockwise_content(mmd,blocks= [(r'\\\[.*?\\\]', 'block_equation') ])
     for _type, block_content in blocks:
         if _type == 'text':
             for line in block_content.splitlines():
                 if not line.strip():continue
-                line_dct_color = color_dct_line(line,color,keep_structure)
+                line_dct_color = color_dct_line(line,color,keep_structure,color_manager)
                 dct_color = dct_color|line_dct_color
         elif _type == 'block_equation':
-            block_content = block_content.strip()
-            dct_color[add_rgb(color)] = ["<block_math>",block_content[:2]]
-            text = block_content[2:-2]
-            matches = re.findall(r'\[([0-9A-Fa-f]{6})\]([^\[]*)', text)
+            block_content    = block_content.strip()
+            dct_color[color_manager.shift(color)] = ["<block_math>",block_content[:2]]
+            text             = block_content[2:-2]
+            matches          = re.findall(r'\[([0-9A-Fa-f]{6})\]([^\[]*)', text)
             if matches:
                 if len(set([c for c, _ in matches]))!=1:
                     logging.info(f"why a block equation has more than one color as {matches}")
@@ -450,11 +469,11 @@ def   colored_dct(mmd,keep_structure=True):
                 dct_color[color] += '\n'
                 block_equation_color_map[color] += '\n'
             else:
-                dct_color[add_rgb(color)] = ["<block_math>", text]
-
-            dct_color[add_rgb(color)] = ["<block_math>",block_content[-2:]]
+                dct_color[color_manager.shift(color)] = ["<block_math>", text]
+            dct_color[color_manager.shift(color)] = ["<block_math>",block_content[-2:]]
         else:
             raise NotImplementedError(f"not implement for _type={_type}")
+        
     dct_color_cleaned =  OrderedDict()
     for k,v in dct_color.items():
         if isinstance(v,list):
@@ -623,12 +642,54 @@ def align_sequences(seq1, seq2):
     alignment.reverse()
     return alignment
 
+from diff_match_patch import diff_match_patch
+
+def get_opcodes(sequence1, sequence2):
+    """
+    this still not perfect~~!!!
+    """
+    # Initialize the diff_match_patch object
+    dmp = diff_match_patch()
+
+    # Join sequences with a unique delimiter to avoid merging words
+    delimiter = '\x00'  # Using a null character as a safe delimiter
+    joined1 = delimiter.join(sequence1)
+    joined2 = delimiter.join(sequence2)
+
+    # Compute the diff
+    diffs = dmp.diff_main(joined1, joined2)
+    
+    # Clean up the diff for better readability
+    dmp.diff_cleanupSemantic(diffs)
+    
+    # Translate the diff_match_patch output to a format similar to difflib's opcodes
+    opcodes = []
+    i1, i2 = 0, 0
+    
+    for op, data in diffs:
+        words = data.split(delimiter)
+        for word in words:
+            if op == diff_match_patch.DIFF_EQUAL:
+                opcodes.append(('equal', i1, i1 + 1, i2, i2 + 1))
+                i1 += 1
+                i2 += 1
+            elif op == diff_match_patch.DIFF_DELETE:
+                if word in sequence1:
+                    # Adjust to treat partial matches as equal
+                    opcodes.append(('delete', i1, i1 + 1, i2, i2))
+                    i1 += 1
+            elif op == diff_match_patch.DIFF_INSERT:
+                opcodes.append(('insert', i1, i1, i2, i2 + 1))
+                i2 += 1
+        
+    return opcodes
+
 def get_real_match(sequence1, sequence2):
     """
     Match along sequence1, 
     """
     real_match = []
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, sequence1, sequence2).get_opcodes():
+    for tag, i1, i2, j1, j2 in get_opcodes(sequence1, sequence2):
         if tag == 'replace':
             seq1 = sequence1[i1:i2]
             seq2 = sequence2[j1:j2]
@@ -681,6 +742,16 @@ def find_colored_rectangles(page,colors):
     
     return colored_rectangles
 
+def smart_filter_line_break_string(string):
+    string = string.strip()
+    string_new = string.strip('-')
+    if len(string_new) > 0:
+        return string_new
+    else:
+        return string
+
+
+
 from typing import Tuple
 def check_the_bbox_is_out_of_the_region(bbox:Tuple[float, float,float, float], bbox_region:Tuple[float, float,float, float]):
     """ Check if the bounding box is out of the region. """
@@ -689,6 +760,7 @@ def check_the_bbox_is_out_of_the_region(bbox:Tuple[float, float,float, float], b
     return x2 < x1_region or y2 < y1_region or x1 > x2_region or y1 > y2_region
 
 def get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list):
+    color_manager = ColorManager()
     colored_rectangles = find_colored_rectangles(page,fig_color_dct.keys())
     pdf_draw_color_bbox_map = {}
     for now_draw in colored_rectangles:
@@ -723,7 +795,7 @@ def get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_co
                     continue
                 if color==0 or color == (0,0,0) and last_color[0] == "caption":
                     color = last_color[1]
-                    caption_matched_in_this_page[add_rgb(color)] = (s['text'],s['bbox'])
+                    caption_matched_in_this_page[color_manager.shift(color)] = (s['text'],s['bbox'])
                     last_color = ["caption", color]
                 else:
                     last_color = ["main_content", color]
@@ -757,7 +829,7 @@ def get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_co
     for position in range(len(sequence2boxed)):
         part = sequence2boxed[position]
         if isinstance(part,list):
-            text = "".join([t['text'].strip().strip("-") for t in part]) ## should be one word
+            text = "".join([smart_filter_line_break_string(t['text']) for t in part]) ## should be one word
             color= part[0]['color']
             bbox = merge_bboxes([t['bbox'] for t in part],tolerance=1)
             if bbox is None:
@@ -788,6 +860,124 @@ def get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_co
     sequence2boxed =    [(cb['color'], cb['text'], cb['bbox']) for cb in sequence2boxed]
     return sequence2boxed,caption_matched_in_this_page, figid_from_figure, figid_from_caption, pdf_draw_color_bbox_map,color_to_position
 
+def generate_final_match_table(true_match, sequence1o, sequence2boxed, verbose_level=1):
+    """
+    Get output type [ markdown_text, pdf_text, status, text_type, text_bbox]
+    """
+    pretext_and_prompts = []
+    color_table_seq_pdf = {c: i for i, (c,_,_) in enumerate(sequence2boxed) if c != (0,0,0) and is_meaningful_markdonw_color(c)}
+    for tag, i1, i2, j1, j2 in true_match:
+
+        markdown_parts = sequence1o[i1:i2]
+        pdf_color_box  = sequence2boxed[j1:j2]
+        pdf_text       = " ".join([t[1] for t in pdf_color_box]) ### <--- pdf text
+        
+        if len(markdown_parts)==0: ### <--- then it be an insect case
+            if len(pdf_text.strip())==0:continue
+            if not all([sum(t[0])==0 for t in pdf_color_box]):
+
+                logging.debug(f"({tag}, {i1}, {i2}, {j1}, {j2})This an empty markdown text but not empty pdf color box, throw it: the pdf box data is:")
+                for data in pdf_color_box:
+                    logging.debug(f"color={data[0]}, text= {data[1]}")
+                logging.debug("=========================")
+            else:
+                logging.info(f"safe throw: markdown_text={markdown_parts} pdf_text={pdf_text}")
+            continue
+        
+        if len(pdf_color_box) == 0: ### <--- then it be an delete case
+            for c, text, _type in markdown_parts:
+                if len(text.strip())==0:continue
+                if invisable_symbol(text,_type):
+                    pretext_and_prompts.append([text,"", "invisable", _type ,(-1,-1,-1)])
+                else:
+                    if verbose_level>0:
+                        if is_meaningful_markdonw_color(c):
+                            logging.debug(f"[Important] why you throw a meaningful markdown color={c} text={text}")
+                        else:
+                            logging.info(f"it seem you have to throw a text to match. The text={text} with color={c}")
+            continue
+        if len(markdown_parts)>1:
+            raise NotImplementedError(f"seem has problem for this mardown text: {markdown_parts} ")
+            
+            
+        (color,markdown_text, markdown_type) =  markdown_parts[0]
+
+        if tag in ['equal','aligned']:
+            merged_bbox   = merge_bboxes([t[2] for t in pdf_color_box])
+            if merged_bbox is None:merged_bbox = pdf_color_box[0][2]
+            char_markdown = re.sub(r'[ -]+', '', markdown_text).lower()
+            char_pdf = re.sub(r'[ -]+', '', "".join(pdf_text)).lower()
+            if  (char_markdown != char_pdf and 
+                not  char_markdown.startswith(char_pdf) and 
+                not  char_pdf.startswith(char_markdown) and
+                not  char_markdown.endswith(char_pdf) and
+                not  char_pdf.endswith(char_markdown) and
+                not  invisable_symbol(markdown_text,markdown_type)
+                ):
+
+                if any([isinstance(c,float) for c in color]) :
+                    pretext_and_prompts.append([markdown_text, pdf_text, 'throw', markdown_type, (-1, -1, -1)])
+                    logging.info(f"bad match!!! throw {markdown_type}:{markdown_text.strip()}<=>{pdf_text.strip()} char level is {char_markdown}<=>{char_pdf} {[int(l) for l in merged_bbox]}")
+                else:
+                    pretext_and_prompts.append([markdown_text, pdf_text, 'invisable', markdown_type, (-1, -1, -1)])
+                    logging.info(f"bad match!!! but {markdown_text.strip()} is a invisable sign, skip")
+                continue
+            if merged_bbox is None:
+                ### is may due to the Line breaks such as 
+                ###  xxxxxxxxxx out-
+                ###  side xxxxxxxxxx
+                ###  xxxxxxxxxxxxxxx
+                ### for those case, lets divide the markdown_text
+                if char_markdown != char_pdf:
+                    logging.info(f"mismatch?? [{markdown_text}] <=> [{pdf_text}]")
+                for color_box in pdf_color_box:
+                    markdown_text = pdf_text = color_box[1]
+                    merged_bbox   = color_box[2]
+                    pretext_and_prompts.append([markdown_text, pdf_text, 'match' ,markdown_type,merged_bbox])
+                    logging.info(f"{tag:7s} {markdown_text.strip():20s} {pdf_text.strip():20s} {[int(l) for l in merged_bbox]}")
+
+            else:
+                pretext_and_prompts.append([markdown_text, pdf_text, 'match' ,markdown_type,merged_bbox])
+                logging.info(f"{tag:7s} {markdown_text.strip():20s} {pdf_text.strip():20s} {[int(l) for l in merged_bbox]}")
+
+        elif tag == 'delete':
+            if is_this_part_is_invisable_symbol_in_markdown(markdown_text):
+                logging.info("this is the invisable markdown text", markdown_text.strip(),pdf_text.strip() )
+                pretext_and_prompts.append([markdown_text, pdf_text, "invisable" ,markdown_type, (-1,-1,-1)])
+            elif any([isinstance(c,float) for c in color]):
+
+                if all([t['color']==0 for t in pdf_color_box]):
+                    ### this mean there is symbol in markdown is not get colored by pdf engine like µ
+                    ### lets put it back to last markdown slot
+                    ##### since we pre caption already, this still should not appear here 
+                    raise NotImplementedError(f"why you throw a symbol but no color source: markdown_text={markdown_text.strip()} pdf_text={pdf_text.strip()}")
+                    if pretext_and_prompts and pretext_and_prompts[-1][2]!='throw':
+                        pretext_and_prompts[-1][0]+=' '+markdown_text
+                    logging.info("put the symbol to last markdone slot", markdown_text.strip(),pdf_text.strip() )
+                else:
+                    logging.info(f"safe throw as it is a black symbol but no markdown source: markdown_text={markdown_text.strip()} pdf_text={pdf_text.strip()}")
+            elif color in color_table_seq_pdf:
+                target_j = color_table_seq_pdf[color]
+                pdf_text = sequence2boxed[target_j]['text']
+                merged_bbox = sequence2boxed[target_j]['bbox']
+                # but it should not match here since we pre match caption already, lets throw
+                logging.debug(f"==> [this should not appear] color match {target_j} <===",markdown_text.strip(),pdf_text.strip(), [int(l) for l in merged_bbox])
+
+            else:
+                logging.debug("==> unsave throw <===",markdown_text.strip(),pdf_text.strip() )
+                ## then we will use color find the correct part
+        
+        else:
+
+            logging.debug(tag,markdown_text,pdf_text )
+
+    return pretext_and_prompts
+
+# from pylatexenc.latex2text import LatexNodes2Text
+# latex2textEg = LatexNodes2Text()
+import regex
+import latex2mathml.commands as commands
+fontpattern = r'\\(?:' + '|'.join([t.lstrip('\\') for t in commands.LOCAL_FONTS.keys()])+r')(\{(?:[^{}]++|(?1))*\})'
 def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side='left'):
     
     sequence1o = [(color, text, dtype) for color, (text, dtype) in current_mmd_color_dct.items()]
@@ -813,18 +1003,67 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
         pair.pop(-1)  ### this while totally remove the last sequence match ability but make more accuracte when color is applied properly
     if len(pair)==0:
         fail_to_match = True
-
+    order_for_sequence_1 = {}
+    for tag, i1, i2, j1, j2 in pair:
+        if i1 not in order_for_sequence_1:
+            order_for_sequence_1[i1] = [(i2, j1, j2, tag)]
+        else:
+            if i2 - i1 > 0:
+                old_i2, old_j1, old_j2, old_tag = order_for_sequence_1[i1][-1]
+                old_i1 = i1
+                if (j2 - j1) ==0 or (old_j2 - old_j1) ==0 or (old_i2-old_i1)==0:
+                    # seem add a delete task: lets append and continue
+                    order_for_sequence_1[i1].append((i2, j1, j2, tag))
+                else:
+                    logging.warning("below case since has multiple align")
+                    logging.warning('new:')
+                    logging.warning('   {:7}   seq1[{}:{}] --> {}'.format(tag, i1, i2, sequence1[i1:i2]))
+                    logging.warning('             seq2[{}:{}] --> {}\n'.format(j1, j2, sequence2[j1:j2])) 
+                    logging.warning('old:')
+                    logging.warning('   {:7}   seq1[{}:{}] --> {}'.format(tag, old_i1, old_i2, sequence1[old_i1:old_i2]))
+                    logging.warning('             seq2[{}:{}] --> {}\n'.format(old_j1, old_j2, sequence2[old_j1:old_j2])) 
+            else:
+                order_for_sequence_1[i1].append((i2, j1, j2, tag))
+    i1 = i2 = 0
+    new_pair = []
+    while i2 < len(sequence1) and j2 < len(sequence2):
+        if i1 not in order_for_sequence_1:
+            i2 = i1 + 1
+            new_pair.append(['delete', i1, i2, j2,j2])
+            j2+=1
+            i1 = i2
+            continue
+        for i2, j1, j2, tag in order_for_sequence_1[i1]:
+            new_pair.append([tag, i1, i2, j1,j2])
+        i1 = i2
+    pair = new_pair
     # for tag, i1,i2,j1,j2 in pair:
     #     print('{:7}   seq1[{}:{}] --> {}'.format(tag, i1, i2, sequence1[i1:i2]))
     #     print('          seq2[{}:{}] --> {}\n'.format(j1, j2, sequence2[j1:j2]))
-    sequence1_text = [t[1] for t in sequence1]
-    sequence2_text = [t[1] for t in sequence2]
+    sequence1_text = []
+    for c, text, _type in sequence1:
+
+        text = text.strip()
+        if _type == '<inline_math>':
+            text = regex.sub(fontpattern, lambda m:m[1][1:-1],text)
+        sequence1_text.append(text) 
+    sequence2_text = [t[1].strip() for t in sequence2]
 
     true_match = []
     for tag, i1,i2,j1,j2 in pair:
         if tag == 'need':
+            
             seq1 = sequence1_text[i1:i2]
             seq2 = sequence2_text[j1:j2]
+            if len(seq2) == 0 and len(seq1)>0 and all([t[-1]== '<inline_math>' for t in sequence1[i1:i2]]):
+                true_match.append([tag,i1,i2,j1,j2])
+                continue
+            if len(seq1) == 0 and len(seq2)>0:
+                true_match.append([tag,i1,i2,j1,j2])
+                continue
+            if len(seq1) == 0 and len(seq2) == 0:
+                continue
+                
             for tag, i1_now, i2_now, j1_now, j2_now in get_real_match(seq1, seq2):
                 true_match.append([tag,i1+i1_now, i1+i2_now,j1+j1_now, j1+j2_now])
         else:
@@ -844,115 +1083,7 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
             true_match.pop(-1)
 
     ############## final match align ##################
-
-    verbose_level=1
-    pretext_and_prompts = []
-    color_table_seq_pdf = {c: i for i, (c,_,_) in enumerate(sequence_pdf) if c != (0,0,0) and is_meaningful_markdonw_color(c)}
-    for tag, i1, i2, j1, j2 in true_match:
-
-        markdown_text = sequence1o[i1:i2]
-        pdf_color_box = sequence2boxed[j1:j2]
-        merged_text= " ".join([t[1] for t in pdf_color_box])
-        if len(markdown_text)==0:
-            if len(merged_text.strip())==0:continue
-            if not all([sum(t[0])==0 for t in pdf_color_box]):
-
-                logging.debug(f"({tag}, {i1}, {i2}, {j1}, {j2})This an empty markdown text but not empty pdf color box, throw it: the pdf box data is:")
-                for data in pdf_color_box:
-                    logging.debug(f"color={data[0]}, text= {data[1]}")
-                logging.debug("=========================")
-            else:
-                logging.info(f"safe throw: markdown_text={markdown_text} merged_text={merged_text}")
-            continue
-        
-        if len(pdf_color_box) == 0:
-            for c, text, _type in markdown_text:
-                if len(text.strip())==0:continue
-                if invisable_symbol(text,_type):
-                    pretext_and_prompts.append([text,['mask']])
-                else:
-                    
-                    if verbose_level>0:
-                        if is_meaningful_markdonw_color(c):
-                            logging.debug(f"[Important] why you throw a meaningful markdown color={c} text={text}")
-                        else:
-                            logging.info(f"it seem you have to throw a text to match. The text={text} with color={c}")
-            continue
-        if len(markdown_text)>1:
-            raise NotImplementedError(f"seem has problem for this mardown text: {markdown_text} ")
-            
-            
-        (color,markdown_text, markdown_type) =  markdown_text[0]
-
-        if tag in ['equal','aligned']:
-            merged_bbox   = merge_bboxes([t[2] for t in pdf_color_box])
-            if merged_bbox is None:merged_bbox = pdf_color_box[0][2]
-            char_markdown = re.sub(r'[ -]+', '', markdown_text).lower()
-            char_pdf = re.sub(r'[ -]+', '', "".join(merged_text)).lower()
-            if  (char_markdown != char_pdf and 
-                not  char_markdown.startswith(char_pdf) and 
-                not  char_pdf.startswith(char_markdown) and
-                not  char_markdown.endswith(char_pdf) and
-                not  char_pdf.endswith(char_markdown) and
-                not  invisable_symbol(markdown_text,markdown_type)
-                ):
-
-                if any([isinstance(c,float) for c in color]) :
-                    pretext_and_prompts.append([markdown_text,['throw']])
-                    logging.info(f"bad match!!! throw {markdown_type}:{markdown_text.strip()}<=>{merged_text.strip()} char level is {char_markdown}<=>{char_pdf} {[int(l) for l in merged_bbox]}")
-                else:
-                    pretext_and_prompts.append([markdown_text,['mask']])
-                    logging.info(f"bad match!!! but {markdown_text.strip()} is a unvisable sign, skip")
-                continue
-            if merged_bbox is None:
-                ### is may due to the Line breaks such as 
-                ###  xxxxxxxxxx out-
-                ###  side xxxxxxxxxx
-                ###  xxxxxxxxxxxxxxx
-                ### for those case, lets divide the markdown_text
-                if char_markdown != char_pdf:
-                    logging.info(f"mismatch?? [{markdown_text}] <=> [{merged_text}]")
-                for color_box in pdf_color_box:
-                    markdown_text = merged_text = color_box[1]
-                    merged_bbox   = color_box[2]
-                    pretext_and_prompts.append([markdown_text,merged_bbox])
-                    logging.info(f"{tag:7s} {markdown_text.strip():20s} {merged_text.strip():20s} {[int(l) for l in merged_bbox]}")
-
-            else:
-                pretext_and_prompts.append([markdown_text,merged_bbox])
-                logging.info(f"{tag:7s} {markdown_text.strip():20s} {merged_text.strip():20s} {[int(l) for l in merged_bbox]}")
-
-        elif tag == 'delete':
-            if is_this_part_is_invisable_symbol_in_markdown(markdown_text):
-                logging.info("this is the invisable markdown text", markdown_text.strip(),merged_text.strip() )
-                pretext_and_prompts.append([markdown_text,"[mask]"])
-            elif any([isinstance(c,float) for c in color]):
-
-                if all([t['color']==0 for t in pdf_color_box]):
-                    ### this mean there is symbol in markdown is not get colored by pdf engine like µ
-                    ### lets put it back to last markdown slot
-
-                    ##### since we pre caption already, this still should not appear here 
-                    if pretext_and_prompts and pretext_and_prompts[-1][1]!='throw':
-                        pretext_and_prompts[-1][0]+=' '+markdown_text
-                    logging.info("put the symbol to last markdone slot", markdown_text.strip(),merged_text.strip() )
-                else:
-                    logging.info(f"safe throw as it is a black symbol but no markdown source: markdown_text={markdown_text.strip()} merged_text={merged_text.strip()}")
-            elif color in color_table_seq_pdf:
-                target_j = color_table_seq_pdf[color]
-                merged_text = sequence2boxed[target_j]['text']
-                merged_bbox = sequence2boxed[target_j]['bbox']
-                # but it should not match here since we pre match caption already, lets throw
-                logging.debug(f"==> [this should not appear] color match {target_j} <===",markdown_text.strip(),merged_text.strip(), [int(l) for l in merged_bbox])
-
-            else:
-                logging.debug("==> unsave throw <===",markdown_text.strip(),merged_text.strip() )
-                ## then we will use color find the correct part
-        else:
-
-            logging.debug(tag,markdown_text,merged_text )
-
-
+    pretext_and_prompts = generate_final_match_table(true_match, sequence1o, sequence2, verbose_level=1)
     return pretext_and_prompts, true_match
 
 def invisable_symbol(text,_type):
@@ -1009,7 +1140,7 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     fig_captions_list,
     color_figid_map,block_equation_color_map) = get_markdown_text_with_colored(html_path)
     
-    now_table_figure_masked_pdf = pdf_file_path.replace('.colorful.pdf','.colorful_text_colored.pdf')
+    now_table_figure_masked_pdf = pdf_file_path.replace('.colorful.pdf','.colorful.text_only.pdf')
     #pdf_file_path = pdf_file_path.replace('.colorful.pdf','.colorful_all_colored.pdf')
     
     if args.verbose: 
@@ -1118,8 +1249,8 @@ def deal_with_one_pdf_file_wrapper(args):
 
         return 'pass', html_path
     except Exception as e:
-        print(f"error for {html_path} with {e}")
         if args.debug:
+            print(f"error for {html_path} with {e}")
             traceback.print_exc()
             raise
         return 'fail', html_path
