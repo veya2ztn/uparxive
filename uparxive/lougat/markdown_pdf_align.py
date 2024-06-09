@@ -644,7 +644,7 @@ def align_sequences(seq1, seq2):
 
 from diff_match_patch import diff_match_patch
 
-def get_opcodes(sequence1, sequence2):
+def get_opcodes_old(sequence1, sequence2):
     """
     this still not perfect~~!!!
     """
@@ -684,6 +684,95 @@ def get_opcodes(sequence1, sequence2):
         
     return opcodes
 
+def get_opcodes(sequence1, sequence2):
+    """
+    Below is a char level scan but it till now perfect 
+    check passed below 
+        # Example usage:
+        sequence1 = ['\\(', 'DCFL[']
+        sequence2 = ['DCFL', '[5das']
+
+        opcodes = get_opcodes(sequence1, sequence2)
+        for opcode in opcodes:
+            print(opcode)
+        print("===================")
+        sequence1 = ['\\(', '\\{CFL']
+        sequence2 = ['CFL']
+        opcodes = get_opcodes(sequence1, sequence2)
+        for opcode in opcodes:
+            print(opcode)
+    
+    """
+    # Initialize the diff_match_patch object
+    dmp = diff_match_patch()
+
+    # Concatenate the sequences into single strings
+    joined1 = "".join(sequence1)
+    joined2 = "".join(sequence2)
+
+    # Compute the diff
+    diffs = dmp.diff_main(joined1, joined2)
+    
+    # Clean up the diff for better readability
+    dmp.diff_cleanupSemantic(diffs)
+
+    # Helper function to map char index to word index
+    def map_char_to_word_index(sequence, char_index):
+        total_length = 0
+        for word_index, word in enumerate(sequence):
+            total_length += len(word)
+            if char_index < total_length:
+                return word_index
+        return len(sequence)
+
+    opcodes = []
+    char_index1, char_index2 = 0, 0
+
+    for (op, data) in diffs:
+        length = len(data)
+
+        if op == diff_match_patch.DIFF_EQUAL:
+            start1 = map_char_to_word_index(sequence1, char_index1)
+            end1 = map_char_to_word_index(sequence1, char_index1 + length - 1) + 1
+            start2 = map_char_to_word_index(sequence2, char_index2)
+            end2 = map_char_to_word_index(sequence2, char_index2 + length - 1) + 1
+            opcodes.append(('equal', start1, end1, start2, end2))
+            char_index1 += length
+            char_index2 += length
+        elif op == diff_match_patch.DIFF_DELETE:
+            start1 = map_char_to_word_index(sequence1, char_index1)
+            end1 = map_char_to_word_index(sequence1, char_index1 + length - 1) + 1
+            start2 = map_char_to_word_index(sequence2, char_index2)
+            opcodes.append(('delete', start1, end1, start2, start2))
+            char_index1 += length
+        elif op == diff_match_patch.DIFF_INSERT:
+            start1 = map_char_to_word_index(sequence1, char_index1)
+            start2 = map_char_to_word_index(sequence2, char_index2)
+            end2 = map_char_to_word_index(sequence2, char_index2 + length - 1) + 1
+            opcodes.append(('insert', start1, start1, start2, end2))
+            char_index2 += length
+    # Adjust opcodes to prioritize delete over equal if delete comes first in partial matches
+    adjusted_opcodes = []
+    i = 0
+    while i < len(opcodes):
+        current_opcode = opcodes[i]
+        
+        if current_opcode[0] == 'equal' and i + 1 < len(opcodes):
+            next_opcode = opcodes[i + 1]
+            if next_opcode[0] == 'delete':
+                # Convert the equal to delete if the next operation is delete
+                adjusted_opcodes.append(('delete', current_opcode[1], current_opcode[2], current_opcode[3], current_opcode[3]))
+                i += 2  # Skip the next delete operation
+            else:
+                # Adjust the indices to reflect accurate operations
+                adjusted_opcodes.append(('equal', current_opcode[1], current_opcode[2], current_opcode[3], next_opcode[3]))
+                i += 1
+        else:
+            adjusted_opcodes.append(current_opcode)
+            i += 1
+
+    return adjusted_opcodes
+
 def get_real_match(sequence1, sequence2):
     """
     Match along sequence1, 
@@ -715,7 +804,7 @@ def get_real_match(sequence1, sequence2):
             j1_now = j1
             j2_now = j2
             if tag == 'equal':
-                assert (i2_now - i1_now) == (j2_now - j1_now)
+                #assert (i2_now - i1_now) == (j2_now - j1_now) ### current use char level get_opcodes will cause j2_now - j1_now > (i2_now - i1_now)
                 for i, j in zip(range(i1_now, i2_now),range(j1_now,j2_now)):
                     real_match.append((tag, i, i+1,j, j+1))
             else:
@@ -916,10 +1005,10 @@ def generate_final_match_table(true_match, sequence1o, sequence2boxed, verbose_l
                 ):
 
                 if any([isinstance(c,float) for c in color]) :
-                    pretext_and_prompts.append([markdown_text, pdf_text, 'throw', markdown_type, (-1, -1, -1)])
+                    pretext_and_prompts.append([markdown_text, pdf_text, 'throw', markdown_type, None])
                     logging.info(f"bad match!!! throw {markdown_type}:{markdown_text.strip()}<=>{pdf_text.strip()} char level is {char_markdown}<=>{char_pdf} {[int(l) for l in merged_bbox]}")
                 else:
-                    pretext_and_prompts.append([markdown_text, pdf_text, 'invisable', markdown_type, (-1, -1, -1)])
+                    pretext_and_prompts.append([markdown_text, pdf_text, 'invisable', markdown_type, None])
                     logging.info(f"bad match!!! but {markdown_text.strip()} is a invisable sign, skip")
                 continue
             if merged_bbox is None:
@@ -1131,6 +1220,7 @@ def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,ca
     return pretext_and_prompts,true_match
 
 from PIL import Image, ImageDraw
+import pandas as pd
 def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     if args.verbose: print(f"we start reading coloed markdown from {html_path}")
     (mmd,
@@ -1174,19 +1264,19 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
             else:
                 _,_,page_w,page_h = page.rect
                 normed_pretext_and_prompts = []
-                for text, bbox in pretext_and_prompts:
-                    if isinstance(bbox,tuple) and len(bbox)==4:
+                for markdown, pdf_text, status, text_type, bbox in pretext_and_prompts:
+                    if bbox and isinstance(bbox,tuple) and len(bbox)==4:
                         bbox  = norm_box(bbox,page_h,page_w)
-                    normed_pretext_and_prompts.append([text, bbox])
+                    normed_pretext_and_prompts.append([markdown, pdf_text, status, text_type, bbox])
                 if args.verbose:
                     logging.info(f""" ============= for page {page_idx}, we get {len(normed_pretext_and_prompts)} box =================== """)
                 img = Image.open(clean_png_path)
 
-                for text_and_box in normed_pretext_and_prompts:
+                for markdown, pdf_text, status, text_type, box in normed_pretext_and_prompts:
         
-                    if len(text_and_box)!=2:logging.debug(text_and_box)
-                    text, box = text_and_box
-                    if box is None:logging.debug(text_and_box)
+                    #if len(text_and_box)!=2:logging.debug(text_and_box)
+                    #text, box = text_and_box
+                    #if box is None:logging.debug(text_and_box)
                     if len(box[0])!=2 or len(box[1])!=2: continue
                     bbox = box
                     width, height = img.size
@@ -1208,14 +1298,19 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
                 boxed_image = os.path.join(png_dir, 'boxed',f"boxed_page_{page_idx}.png")
                 os.makedirs(os.path.dirname(boxed_image),exist_ok=True)
                 img.save(boxed_image)
-                boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.jsonl")
+                
+                boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.csv")
                 os.makedirs(os.path.dirname(boxed_info),exist_ok=True)
-                boxed_dict  = [{'text':t, 'bbox':b} for t,b in normed_pretext_and_prompts]
-                with open(boxed_info,'w') as f:
-                    json.dump(boxed_dict, f)
+                df = pd.DataFrame(normed_pretext_and_prompts, columns=['markdown','pdf','status','text_type','bbox'])
+                df.to_csv(boxed_info)
+                # boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.jsonl")
+                # boxed_dict  = [{'text':t, 'bbox':b} for t,b in normed_pretext_and_prompts]
+                # with open(boxed_info,'w') as f:
+                #     json.dump(boxed_dict, f)
 
-                for text, _ in normed_pretext_and_prompts:
-                    whole_markdown+=" "+text   
+                for text, _, _, text_type, bbox in pretext_and_prompts:
+                    end = "" if text_type =="<inline_math>" else " "
+                    whole_markdown += text + end
         except:
             if args.debug:
                 
