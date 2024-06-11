@@ -304,6 +304,7 @@ def simple_math_color_format(latex_input):
             result[i-1] = (result[i-1][0], prev_line.rstrip())
             result[i]   = (  result[i][0], curr_line.lstrip())
     return result
+
 def blockwise_content(content, blocks):
     # Combine all block patterns into one regex
     combined_pattern = '|'.join(f'({pattern})' for pattern, _ in blocks)
@@ -977,7 +978,7 @@ def generate_final_match_table(true_match, sequence1o, sequence2boxed, verbose_l
             for c, text, _type in markdown_parts:
                 if len(text.strip())==0:continue
                 if invisable_symbol(text,_type):
-                    pretext_and_prompts.append([text,"", "invisable", _type ,(-1,-1,-1)])
+                    pretext_and_prompts.append([text,"", "invisable", _type ,None])
                 else:
                     if verbose_level>0:
                         if is_meaningful_markdonw_color(c):
@@ -1032,7 +1033,7 @@ def generate_final_match_table(true_match, sequence1o, sequence2boxed, verbose_l
         elif tag == 'delete':
             if is_this_part_is_invisable_symbol_in_markdown(markdown_text):
                 logging.info("this is the invisable markdown text", markdown_text.strip(),pdf_text.strip() )
-                pretext_and_prompts.append([markdown_text, pdf_text, "invisable" ,markdown_type, (-1,-1,-1)])
+                pretext_and_prompts.append([markdown_text, pdf_text, "invisable" ,markdown_type, None])
             elif any([isinstance(c,float) for c in color]):
 
                 if all([t['color']==0 for t in pdf_color_box]):
@@ -1074,11 +1075,8 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
     color_indexes_map = {color:i for i,(color, text, dtype) in enumerate(sequence1o) if color!=(0,0,0) and is_meaningful_markdonw_color(color)}
     sequence_pdf = sequence2boxed
     color_index_in_pdf = [color_indexes_map[color] for color,_,_ in sequence_pdf if color !=(0,0,0) and color in color_indexes_map] ### some color may appear in caption, then pass
-    if len(color_index_in_pdf)==0:
-        return None, None
+    if len(color_index_in_pdf)==0: return None, None
     sequence_mmd = [(color, text, dtype) for color, text, dtype in sequence1o[max(0,min(color_index_in_pdf)-1):max(color_index_in_pdf)+1]]
-
-    sequence_mmd = sequence1o
 
     sequence1=sequence_mmd
     sequence2=sequence_pdf
@@ -1113,7 +1111,7 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
                     logging.warning('             seq2[{}:{}] --> {}\n'.format(old_j1, old_j2, sequence2[old_j1:old_j2])) 
             else:
                 order_for_sequence_1[i1].append((i2, j1, j2, tag))
-    i1 = i2 = 0
+    i1 = i2 = j1 = j2 = 0
     new_pair = []
     while i2 < len(sequence1) and j2 < len(sequence2):
         if i1 not in order_for_sequence_1:
@@ -1124,7 +1122,10 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
             continue
         for i2, j1, j2, tag in order_for_sequence_1[i1]:
             new_pair.append([tag, i1, i2, j1,j2])
-        i1 = i2
+        if i2 > i1:
+            i1 = i2
+        else:
+            i1 = i1 + 1
     pair = new_pair
     # for tag, i1,i2,j1,j2 in pair:
     #     print('{:7}   seq1[{}:{}] --> {}'.format(tag, i1, i2, sequence1[i1:i2]))
@@ -1172,7 +1173,7 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
             true_match.pop(-1)
 
     ############## final match align ##################
-    pretext_and_prompts = generate_final_match_table(true_match, sequence1o, sequence2, verbose_level=1)
+    pretext_and_prompts = generate_final_match_table(true_match, sequence1, sequence2, verbose_level=1)
     return pretext_and_prompts, true_match
 
 def invisable_symbol(text,_type):
@@ -1207,20 +1208,21 @@ def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,ca
         cap = fig_cap['caption']
         for c, v in fig.items():
             if v[0] == "FOOTNOTE":
-                pretext_and_prompts.append((f"<footnote>{v}</footnote>\n",['mask']))
+                pretext_and_prompts.append((f"<footnote>{v}</footnote>\n","",'invisable','mask',None))
             else:
-                pretext_and_prompts.append((f"<fig>{v}</fig>\n",pdf_draw_color_bbox_map[c]))
+                pretext_and_prompts.append((f"<fig>{v}</fig>\n","",'invisable','mask', pdf_draw_color_bbox_map[c]))
         if len(cap)>0:
-            pretext_and_prompts.append((f"<cap>",'[mask]'))
+            pretext_and_prompts.append((f"<cap>","",'invisable','mask',None))
             pretext_and_prompts2,true_match_caption = sequence_sequence_alignment(cap,caption2boxed_now, align_side='right')
             caption_start_position = 0 #true_match_caption[-1][-1]
             pretext_and_prompts.extend(pretext_and_prompts2)
-            pretext_and_prompts.append((f"</cap>",'[mask]'))
+            pretext_and_prompts.append((f"</cap>","",'invisable','mask',None))
     
     return pretext_and_prompts,true_match
 
 from PIL import Image, ImageDraw
 import pandas as pd
+from tqdm.auto import tqdm
 def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     if args.verbose: print(f"we start reading coloed markdown from {html_path}")
     (mmd,
@@ -1234,7 +1236,7 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     #pdf_file_path = pdf_file_path.replace('.colorful.pdf','.colorful_all_colored.pdf')
     
     if args.verbose: 
-        print(f"we start reading full coloed pdf from {pdf}")
+        print(f"we start reading full coloed pdf from {pdf_file_path}")
         print(f"we start reading normal coloed pdf from {now_table_figure_masked_pdf}")
     pdf      = fitz.open(pdf_file_path)
     pdf0     = fitz.open(now_table_figure_masked_pdf)
@@ -1260,7 +1262,7 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
             # if len(true_match) > 0:start_position += true_match[-1][2]
 
             if pretext_and_prompts == None:
-                logging.warning(f""" ============ fail to processing page {page_idx} ======================= """)
+                tqdm.write(f""" ============ fail to processing page {page_idx} ======================= """)
             else:
                 _,_,page_w,page_h = page.rect
                 normed_pretext_and_prompts = []
@@ -1269,11 +1271,12 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
                         bbox  = norm_box(bbox,page_h,page_w)
                     normed_pretext_and_prompts.append([markdown, pdf_text, status, text_type, bbox])
                 if args.verbose:
-                    logging.info(f""" ============= for page {page_idx}, we get {len(normed_pretext_and_prompts)} box =================== """)
+                    tqdm.write(f""" ============= for page {page_idx}, we get {len(normed_pretext_and_prompts)} box =================== """)
                 img = Image.open(clean_png_path)
 
                 for markdown, pdf_text, status, text_type, box in normed_pretext_and_prompts:
-        
+                    if box is None:continue
+                    
                     #if len(text_and_box)!=2:logging.debug(text_and_box)
                     #text, box = text_and_box
                     #if box is None:logging.debug(text_and_box)
@@ -1326,15 +1329,21 @@ import traceback
 def deal_with_one_pdf_file_wrapper(args):
     html_path, args = args
     if not os.path.exists(html_path):
+        tqdm.write(f"[skip] due to no_source: {html_path}")
         return 'no_source', html_path
     if os.path.getsize(html_path)< 10_000:
+        if args.verbose:
+            tqdm.write(f"[skip] due to too small: {html_path}")
         return 'small_source', html_path
     assert html_path.endswith('.html')
     success_file = html_path.replace('.html','.success')
     if os.path.exists(success_file) and not args.redo:
+        if args.verbose:
+            tqdm.write(f"[skip] {html_path}")
         return 'skip', html_path
     try:
-
+        if args.verbose:
+            tqdm.write(f"[start] to process {html_path}")
         pdf_path  = html_path[:-5] + '.pdf'
         deal_with_one_pdf_file(html_path, pdf_path, args)
         
