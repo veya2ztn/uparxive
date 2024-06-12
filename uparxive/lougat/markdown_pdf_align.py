@@ -26,6 +26,28 @@ class MarkdownPDFalignedConfig(BatchModeConfig):
     redo : bool = False
     task_name = 'md_pdf_aligned'
     debug  : bool = False
+
+
+class MathManager:
+    inline_start = '<inline_start>'
+    inline_end   = '<inline_end>'
+    block_start  = '<block_start>'
+    block_end    = '<block_end>'
+    inline_s     = len('<inline_start>')
+    inline_e     = len('<inline_end>')   
+    block_s      = len('<block_start>')
+    block_e      = len('<block_end>') 
+class MathManager_old:
+    inline_start = r'\\\('
+    inline_end   = r'\\\)'
+    block_start  = r'\\\['
+    block_end    = r'\\\]'
+    inline_s     = 2
+    inline_e     = 2
+    block_s      = 2
+    block_e      = 2
+matheg = MathManager_old()
+
 def discard_color_block(html):
     def is_colored_part(tag):
         return tag.name == 'span' and tag.get('style') 
@@ -191,7 +213,8 @@ def extract_captions_new(pool):
 
 def smart_unicode_to_latex(content):
     new_content = []
-    blocks = blockwise_content(content,blocks= [(r'\\\(.*?\\\)', 'equation'),(r'\\\[.*?\\\]', 'equation')])
+    blocks = blockwise_content(content,blocks= [(matheg.inline_start + r'.*?' + matheg.inline_end, 'equation'),
+                                                (matheg.block_start + r'.*?' + matheg.block_end, 'equation')])
     for _type, block_content in blocks:
         if _type == 'text':
             new_content.append(unicode_to_latex(block_content))
@@ -337,7 +360,7 @@ def blockwise_content(content, blocks):
             latex_blocks.append(['text', remaining_content])
     return latex_blocks
 
-#
+
 def color_dct_text(line, color):
     dct_color = OrderedDict()
     # Split the line at each color code and any following non-space characters
@@ -400,7 +423,7 @@ class ColorManager:
 
 def  color_dct_line(line,color,keep_structure,color_manager):
     dct_color=OrderedDict()
-    blocks = blockwise_content(line,blocks= [(r'\\\(.*?\\\)', 'inline_equation') ])
+    blocks = blockwise_content(line,blocks= [(matheg.inline_start+f'.*?'+matheg.inline_end, 'inline_equation') ])
     for _type, block_content in blocks:
         if _type == 'text':
             partition = re.split(r'(\[[0-9A-Fa-f]{6}\][^\s]+|\s)', block_content.strip())
@@ -422,15 +445,15 @@ def  color_dct_line(line,color,keep_structure,color_manager):
 
         elif _type == 'inline_equation':
             block_content = block_content.strip()
-            dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[:2]]
-            for c,text in simple_math_color_format(block_content[2:-2]):
+            dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[:matheg.inline_s]]
+            for c,text in simple_math_color_format(block_content[matheg.inline_s:-matheg.inline_e]):
                 if c and c!=(0,0,0):
                     assert c not in dct_color or len(text.strip())==0, f"color should be unique {c}"
                     dct_color[c] = ["<inline_math>",text]
                     color = c
                 else:
                     dct_color[color_manager.shift(color)] = ["<inline_math>",text]
-            dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[-2:]]
+            dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[-matheg.inline_e:]]
         else:
             raise NotImplementedError(f"not implement for _type={_type}")
     
@@ -448,7 +471,7 @@ def   colored_dct(mmd,keep_structure=True,color=(0,0,0)):
     color_manager = ColorManager()
     assert len([t for t in re.split(r'(\[[0-9A-Fa-f]{6}\][^\s]+|\s)', mmd) if t.strip()])< 256*256*256
     block_equation_color_map = OrderedDict()
-    blocks = blockwise_content(mmd,blocks= [(r'\\\[.*?\\\]', 'block_equation') ])
+    blocks = blockwise_content(mmd,blocks= [(matheg.block_start+f'.*?'+matheg.block_end, 'block_equation') ])
     for _type, block_content in blocks:
         if _type == 'text':
             for line in block_content.splitlines():
@@ -457,21 +480,32 @@ def   colored_dct(mmd,keep_structure=True,color=(0,0,0)):
                 dct_color = dct_color|line_dct_color
         elif _type == 'block_equation':
             block_content    = block_content.strip()
-            dct_color[color_manager.shift(color)] = ["<block_math>",block_content[:2]]
-            text             = block_content[2:-2]
+            
+            text             = block_content[matheg.block_s:-matheg.block_e]
             matches          = re.findall(r'\[([0-9A-Fa-f]{6})\]([^\[]*)', text)
+            FirstTimeMeetThisColor= False
             if matches:
-                if len(set([c for c, _ in matches]))!=1:
-                    logging.info(f"why a block equation has more than one color as {matches}")
+                if len(set([c for c, _ in matches]))!=1: logging.info(f"why a block equation has more than one color as {matches}")
                 for color, text in matches:
                     color  = hex_to_rgb(color)
-                    dct_color[color] = dct_color.get(color,'') + " " + text
+                    new_text_for_this_color = dct_color.get(color,'') + " " + text
+                    FirstTimeMeetThisColor = color not in block_equation_color_map
                     block_equation_color_map[color]= block_equation_color_map.get(color,'') + " " + text
-                dct_color[color] += '\n'
+                new_text_for_this_color += '\n'
                 block_equation_color_map[color] += '\n'
+                if FirstTimeMeetThisColor:
+                    dct_color[color_manager.shift(color)] = ["<block_math>",'\n'+block_content[:matheg.block_s]+'\n']
+                    dct_color[color] = new_text_for_this_color
+                    dct_color[color_manager.shift(color)] = ["<block_math>",block_content[-matheg.block_e:]+'\n']
+                else:
+                    dct_color[color] = new_text_for_this_color
             else:
+                dct_color[color_manager.shift(color)] = ["<block_math>", '\n'+block_content[:matheg.block_s] +'\n']
                 dct_color[color_manager.shift(color)] = ["<block_math>", text]
-            dct_color[color_manager.shift(color)] = ["<block_math>",block_content[-2:]]
+                dct_color[color_manager.shift(color)] = ["<block_math>", block_content[-matheg.block_e:]+'\n']
+
+
+
         else:
             raise NotImplementedError(f"not implement for _type={_type}")
         
@@ -948,6 +982,8 @@ def get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_co
 #     assert set(should_fig_color) - set(pdf_draw_color_bbox_map.keys()) == set()
 #     assert set(should_cap_color) - set(caption_matched_in_this_page.keys()) == set() 
     sequence2boxed =    [(cb['color'], cb['text'], cb['bbox']) for cb in sequence2boxed]
+
+    
     return sequence2boxed,caption_matched_in_this_page, figid_from_figure, figid_from_caption, pdf_draw_color_bbox_map,color_to_position
 
 def generate_final_match_table(true_match, sequence1o, sequence2boxed, verbose_level=1):
@@ -1065,31 +1101,7 @@ def generate_final_match_table(true_match, sequence1o, sequence2boxed, verbose_l
 
 # from pylatexenc.latex2text import LatexNodes2Text
 # latex2textEg = LatexNodes2Text()
-import regex
-import latex2mathml.commands as commands
-fontpattern = r'\\(?:' + '|'.join([t.lstrip('\\') for t in commands.LOCAL_FONTS.keys()])+r')(\{(?:[^{}]++|(?1))*\})'
-def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side='left'):
-    
-    sequence1o = [(color, text, dtype) for color, (text, dtype) in current_mmd_color_dct.items()]
-
-    color_indexes_map = {color:i for i,(color, text, dtype) in enumerate(sequence1o) if color!=(0,0,0) and is_meaningful_markdonw_color(color)}
-    sequence_pdf = sequence2boxed
-    color_index_in_pdf = [color_indexes_map[color] for color,_,_ in sequence_pdf if color !=(0,0,0) and color in color_indexes_map] ### some color may appear in caption, then pass
-    if len(color_index_in_pdf)==0: return None, None
-    sequence_mmd = [(color, text, dtype) for color, text, dtype in sequence1o[max(0,min(color_index_in_pdf)-1):max(color_index_in_pdf)+1]]
-
-    sequence1=sequence_mmd
-    sequence2=sequence_pdf
-
-    
-    pair = rough_split_by_color_pair(sequence2, sequence1)
-    fail_to_match = False
-    
-
-    while len(pair)>0 and pair[-1][0] == 'need':
-        pair.pop(-1)  ### this while totally remove the last sequence match ability but make more accuracte when color is applied properly
-    if len(pair)==0:
-        fail_to_match = True
+def reorder_pair_match(pair,sequence1,sequence2):
     order_for_sequence_1 = {}
     for tag, i1, i2, j1, j2 in pair:
         if i1 not in order_for_sequence_1:
@@ -1111,13 +1123,14 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
                     logging.warning('             seq2[{}:{}] --> {}\n'.format(old_j1, old_j2, sequence2[old_j1:old_j2])) 
             else:
                 order_for_sequence_1[i1].append((i2, j1, j2, tag))
+
     i1 = i2 = j1 = j2 = 0
     new_pair = []
     while i2 < len(sequence1) and j2 < len(sequence2):
         if i1 not in order_for_sequence_1:
-            i2 = i1 + 1
+            i2  = i1 + 1
             new_pair.append(['delete', i1, i2, j2,j2])
-            j2+=1
+            j2 += 1
             i1 = i2
             continue
         for i2, j1, j2, tag in order_for_sequence_1[i1]:
@@ -1126,7 +1139,37 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
             i1 = i2
         else:
             i1 = i1 + 1
-    pair = new_pair
+    return new_pair
+
+import regex
+import latex2mathml.commands as commands
+fontpattern = r'\\(?:' + '|'.join([t.lstrip('\\') for t in commands.LOCAL_FONTS.keys()])+r')(\{(?:[^{}]++|(?1))*\})'
+def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_start=0, align_side='left'):
+    
+    sequence1o = [(color, text, dtype) for color, (text, dtype) in current_mmd_color_dct.items()]
+
+    color_indexes_map = {color:i for i,(color, text, dtype) in enumerate(sequence1o) if color!=(0,0,0) and is_meaningful_markdonw_color(color)}
+    sequence_pdf = sequence2boxed
+    color_index_in_pdf = [color_indexes_map[color] for color,_,_ in sequence_pdf if color !=(0,0,0) and color in color_indexes_map] ### some color may appear in caption, then pass
+    if len(color_index_in_pdf)==0: return None, None,0
+    
+    mmd_sequence_start  = max(max(0,min(color_index_in_pdf)-1),recommand_start)
+    sequence_mmd = [(color, text, dtype) for color, text, dtype in sequence1o[mmd_sequence_start:max(color_index_in_pdf)+1]]
+
+    sequence1=sequence_mmd
+    sequence2=sequence_pdf
+
+    
+    pair = rough_split_by_color_pair(sequence2, sequence1)
+    fail_to_match = False
+    
+
+    while len(pair)>0 and pair[-1][0] == 'need':
+        pair.pop(-1)  ### this while totally remove the last sequence match ability but make more accuracte when color is applied properly
+    if len(pair)==0:
+        fail_to_match = True
+
+    # pair = reorder_pair_match(pair) ### <-- reorder for true_match because rough pari may pinpoint to farfar early part
     # for tag, i1,i2,j1,j2 in pair:
     #     print('{:7}   seq1[{}:{}] --> {}'.format(tag, i1, i2, sequence1[i1:i2]))
     #     print('          seq2[{}:{}] --> {}\n'.format(j1, j2, sequence2[j1:j2]))
@@ -1158,11 +1201,15 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
                 true_match.append([tag,i1+i1_now, i1+i2_now,j1+j1_now, j1+j2_now])
         else:
             true_match.append([tag,i1, i2,j1, j2])
+    
+    true_match = reorder_pair_match(true_match,sequence1,sequence2)
     if fail_to_match:
-        return None, true_match
+        return None, true_match, 0
     # for tag, i1, i2, j1, j2 in true_match:
     #     print('{:7}   seq1[{}:{}] --> {}'.format(tag, i1, i2, sequence1[i1:i2]))
     #     print('          seq2[{}:{}] --> {}\n'.format(j1, j2, sequence2[j1:j2]))    
+
+    
 
     ### remove the delete case from end which due to the len(marddown) > len(currentpage)
     if align_side == 'left':
@@ -1172,9 +1219,11 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, align_side
         while true_match[-1][0] != 'aligned':
             true_match.pop(-1)
 
+    
     ############## final match align ##################
+    now_we_add_postion_in_mmd = mmd_sequence_start + true_match[-1][1]
     pretext_and_prompts = generate_final_match_table(true_match, sequence1, sequence2, verbose_level=1)
-    return pretext_and_prompts, true_match
+    return pretext_and_prompts, true_match, now_we_add_postion_in_mmd
 
 def invisable_symbol(text,_type):
     return _type in ['<inline_math>', '<block_math>', '<blockmath>'] or is_this_part_is_invisable_symbol_in_markdown(text)
@@ -1182,22 +1231,22 @@ def invisable_symbol(text,_type):
 def is_this_part_is_invisable_symbol_in_markdown(part):
     if part.startswith('#'):
         return True
-    if part in ['\\)','\\(','\\[','\\]']:
+    if part in [matheg.inline_start, matheg.inline_end, matheg.block_end, matheg.block_start]: #['\\)','\\(','\\[','\\]']:
         return True
     return False
 
 
-def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list):
+def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list,recommand_start=0):
     
     sequence2boxed,caption_matched_in_this_page,figid_from_figure, figid_from_caption, pdf_draw_color_bbox_map,color_to_position = get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list)
 
-    pretext_and_prompts,true_match = sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed)
+    pretext_and_prompts,true_match,recommand_start = sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_start=recommand_start)
     #all_keys = [k for k in current_mmd_color_dct.keys()]
     #all_keys = all_keys[true_match[-1][2]:]
     #next_current_mmd_color_dct = OrderedDict({k:current_mmd_color_dct[k] for k in all_keys})
     #### add figure/table caption at end 
     if pretext_and_prompts is None:
-        return None, true_match
+        return None, true_match, 0
     caption_start_position = 0
     pretext_and_prompts[-1][0]+='\n\n'
     caption2boxed=[(c,t,b) for c,(t,b) in caption_matched_in_this_page.items()]
@@ -1213,12 +1262,12 @@ def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,ca
                 pretext_and_prompts.append((f"<fig>{v}</fig>\n","",'invisable','mask', pdf_draw_color_bbox_map[c]))
         if len(cap)>0:
             pretext_and_prompts.append((f"<cap>","",'invisable','mask',None))
-            pretext_and_prompts2,true_match_caption = sequence_sequence_alignment(cap,caption2boxed_now, align_side='right')
+            pretext_and_prompts2,true_match_caption, _ = sequence_sequence_alignment(cap,caption2boxed_now, align_side='right')
             caption_start_position = 0 #true_match_caption[-1][-1]
             pretext_and_prompts.extend(pretext_and_prompts2)
             pretext_and_prompts.append((f"</cap>","",'invisable','mask',None))
     
-    return pretext_and_prompts,true_match
+    return pretext_and_prompts,true_match,recommand_start
 
 from PIL import Image, ImageDraw
 import pandas as pd
@@ -1244,7 +1293,7 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     os.makedirs(png_dir,exist_ok=True)
     
     whole_markdown=""
-    start_position = 0
+    recommand_start = 0
     for page_idx in range(len(pdf)):
         page = pdf[page_idx]
         page0=pdf0[page_idx]
@@ -1252,13 +1301,11 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
         os.makedirs(os.path.dirname(clean_png_path),exist_ok=True)
         with open(clean_png_path, "wb") as f:
             f.write(page0.get_pixmap(dpi=300).pil_tobytes(format="PNG"))      
-        all_keys = [k for k in mmd_color_dct.keys()]
-        all_keys = all_keys[start_position:]
-        current_mmd_color_dct = OrderedDict({k:mmd_color_dct[k] for k in all_keys})
+
+        current_mmd_color_dct =mmd_color_dct
         try:
-            pretext_and_prompts,true_match = deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list)
-            start_position = 0
-        
+            pretext_and_prompts,true_match,recommand_start = deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list,recommand_start=recommand_start)
+
             # if len(true_match) > 0:start_position += true_match[-1][2]
 
             if pretext_and_prompts == None:

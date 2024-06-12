@@ -32,7 +32,7 @@ do
 
         OUTPUTFIE=$paper_fold/temp/$texfilename.html
         if [ ! -e "$OUTPUTFIE" ]; then
-            latexmlc --noparse --nocomments --includestyles --dest=$OUTPUTFIE -log=$paper_fold/temp/latexmlc.log --path=$paper_fold $texfilename.tex > /dev/null
+            latexmlc --timeout 3600 --noparse --nocomments --includestyles --dest=$OUTPUTFIE -log=$paper_fold/temp/latexmlc.log --path=$paper_fold $texfilename.tex > /dev/null
         fi
 
     fi

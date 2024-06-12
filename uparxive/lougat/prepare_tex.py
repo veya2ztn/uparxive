@@ -245,6 +245,7 @@ def blockwise_content(content, blocks= [
         (r'\\begin{table.*?\\end{table.*?}', 'table'),
         (r'\\begin{algorithm.*?\\end{algorithm.*?}', 'algorithm'),
         (r'\\begin{Verbatim.*?\\end{Verbatim.*?}', 'Verbatim'),
+        (r'\\begin{widetext.*?\\end{widetext.*?}', 'equation'),
         
         #(r'\\begin{center.*?\\end{center.*?}', 'center'),
         (r'\\begin{thebibliography.*?\\end{thebibliography.*?}', 'thebibliography'),
@@ -398,7 +399,7 @@ def parse_def(latex_content, commands={}):
         param_regex = r'\$(#\d+)+\$'
         definition = re.sub(param_regex, replace_param_dollars, definition)
         # Store command in dictionary
-        command = {f"\\{command_name}" :{
+        command = {f"\\\\{command_name}" :{
             "params": num_params,
             "definition": definition
         }}
@@ -499,7 +500,7 @@ def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
     definition = latex_content[start_of_definition:end_of_definition-1]
 
     # Store the command in the dictionary
-    commands[r"\\" + command_name] = {
+    commands[f"\\\\{command_name}"] = {
         "params": num_params,
         "default": default_value,
         "definition": definition
@@ -556,20 +557,20 @@ def apply_macros(latex_text, commands):
 def expand_macro(contents):
     latex_blocks = blockwise_content(contents, blocks=[(r'\\documentclass.*?\\begin{document}', 'preamble')])
     redefine_commands = ['\\def','\\Declare', '\\define',
-                            '\\newcommand', '\\let',
-                            '\\def',
-                            '\\newtheorem',
-                            '\\providecommand',
-                            '\\renewcommand'
-                            ]
+                         '\\newcommand', '\\let',
+                         '\\def', '\\usepackage',
+                         '\\eqnobysec','\\newenvironment',
+                         '\\newtheorem',
+                         '\\providecommand',
+                         '\\renewcommand', 
+                         '\\documentclass',"\\global"
+                        ]
     new_latex_blocks = []
     commands = {}
     for _type, content in latex_blocks:
         if _type == 'preamble':
-            assert commands is {}
             for cmd in redefine_commands:
                 content = content.replace(cmd,"\n"+cmd)
-            
             _, command_str, _ =  filter_out_preamble_block(content,redefine_commands = redefine_commands,layout_commands = [] )
             #print(command_str)
             commands = parse_redefine(command_str,commands)
@@ -579,7 +580,6 @@ def expand_macro(contents):
         new_latex_blocks.append(content)
     new_latex_blocks = "\n".join(new_latex_blocks)
     return new_latex_blocks
-
 
 
 
@@ -992,6 +992,12 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
     #content = expand_newcommand_in_latex(content)
     content = content.replace("\\tableofcontents", "") ### we can not handle content
     #content = expand_macro(content)
+    
+    content = expand_macro(content) # <-- this is needed since the \begin environment can also be defined in the newcommand
+    # content =  content.replace('\\em ',' ')
+    content =  re.sub(r'\\begin\s+\{', r'\\begin{', content)
+    content =  re.sub(r'\\end\s+\{', r'\\end{', content)
+    
     latex_blocks,layerout_blocks = process_latex_content(content,False,args.color_mode)
     output = []
     errortable_path = []
@@ -1066,7 +1072,10 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
         output.append(val)
         output.append(f"%^^^^^^^^^^^^^^^^^^^^^^^ {key} ^^^^^^^^^^^^^^^^^^^^^^^^^")
     
-    return errortable_path, "\n".join(output)
+    output = "\n".join(output)
+    output = output.replace('\\`','')
+
+    return errortable_path, output
 
 def convert_color_tex_into_nocolor_tex(file_path):
     assert '.colorful' in file_path

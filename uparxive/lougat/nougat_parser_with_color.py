@@ -1,5 +1,9 @@
+
+
 from nougat.dataset.parser.latexml_parser import *
 from nougat.dataset.parser.latexml_parser import _get_classes,_clean_html_whitespace
+
+
 def parse_latexml_citations(cite: BeautifulSoup, parent: Element) -> None:
     """
     Parses LaTeXML citations and appends them as children to the given parent element.
