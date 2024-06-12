@@ -488,17 +488,15 @@ def   colored_dct(mmd,keep_structure=True,color=(0,0,0)):
                 if len(set([c for c, _ in matches]))!=1: logging.info(f"why a block equation has more than one color as {matches}")
                 for color, text in matches:
                     color  = hex_to_rgb(color)
-                    new_text_for_this_color = dct_color.get(color,'') + " " + text
-                    FirstTimeMeetThisColor = color not in block_equation_color_map
+                    FirstTimeMeetThisColor  = color not in block_equation_color_map
                     block_equation_color_map[color]= block_equation_color_map.get(color,'') + " " + text
-                new_text_for_this_color += '\n'
                 block_equation_color_map[color] += '\n'
                 if FirstTimeMeetThisColor:
                     dct_color[color_manager.shift(color)] = ["<block_math>",'\n'+block_content[:matheg.block_s]+'\n']
-                    dct_color[color] = new_text_for_this_color
+                    dct_color[color] = block_equation_color_map[color]
                     dct_color[color_manager.shift(color)] = ["<block_math>",block_content[-matheg.block_e:]+'\n']
                 else:
-                    dct_color[color] = new_text_for_this_color
+                    dct_color[color] = block_equation_color_map[color]
             else:
                 dct_color[color_manager.shift(color)] = ["<block_math>", '\n'+block_content[:matheg.block_s] +'\n']
                 dct_color[color_manager.shift(color)] = ["<block_math>", text]
@@ -901,7 +899,7 @@ def get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_co
     for b in page.get_textpage().extractDICT()['blocks']:
         for l in b['lines']:
             for s in l['spans']:
-                s['text']= text =unicode_to_latex(s['text'])
+                s['text']= text =unicode_to_latex(s['text']) ## many symbol like 𝛿 and 𝜒 can not correctly handle
                 if len(text.strip())==0:continue
                 bbox     = s['bbox']
                 s['color'] = color = get_color(s['color'])
