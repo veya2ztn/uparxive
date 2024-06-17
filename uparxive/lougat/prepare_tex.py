@@ -61,7 +61,8 @@ def read_content_with_input(latex_file_path):
     rootpath      = os.path.dirname(latex_file_path)
     with open(latex_file_path, 'r', encoding='utf-8') as file:
         content_lines = [t.strip() for t in file]
-    input_pattern = re.compile(r'\\input{(.+?)}')
+    #input_pattern = re.compile(r'\\input{(.+?)}')
+    input_pattern = re.compile(r'\\input\s*{?([^{}\s]+)}?')
     def include_file(match):
         file_name = match.group(1)
         if not file_name.endswith('.tex'):
@@ -88,6 +89,7 @@ def clean_latex_content(content):
         r'\\hspace(\{(?:[^{}]++|(?1))*\})',
         r'\\href(\{(?:[^{}]++|(?1))*\})',
         r'\\email(\{(?:[^{}]++|(?1))*\})',
+        r'\\subjclass(\[.*?\])?\{(?:[^{}]++|(?1))*\}',
         #r'\\affiliation(\{(?:[^{}]++|(?1))*\})',
         r'\\newline',
         r'\\newpage',
@@ -106,6 +108,8 @@ def replace_ref(content, reference_map):
     patterns_to_remove = [
         r'\\cite(\{(?:[^{}]++|(?1))*\})',
         r'\\citet(\{(?:[^{}]++|(?1))*\})',
+        r'\\citep(\{(?:[^{}]++|(?1))*\})',
+        r'\\newcite(\{(?:[^{}]++|(?1))*\})',
         r'\\ref(\{(?:[^{}]++|(?1))*\})',
         r'\\pageref(\{(?:[^{}]++|(?1))*\})',
 
@@ -243,9 +247,13 @@ def blockwise_content(content, blocks= [
         (r'\\begin{abstract}.*?\\end{abstract}', 'abstract'),
         (r'\\begin{fig.*?\\end{fig.*?}', 'figure'),
         (r'\\begin{table.*?\\end{table.*?}', 'table'),
-        (r'\\begin{algorithm.*?\\end{algorithm.*?}', 'algorithm'),
+        (r'\\begin{tabular.*?\\end{tabular.*?}', 'table'),
+        
+        (r'\\begin{algorithm}.*?\\end{algorithm}', 'algorithm'),
+        (r'\\begin{algorithm\*}.*?\\end{algorithm\*}', 'algorithm'),
         (r'\\begin{Verbatim.*?\\end{Verbatim.*?}', 'Verbatim'),
         (r'\\begin{widetext.*?\\end{widetext.*?}', 'equation'),
+        (r'\\begin{flalign.*?\\end{flalign.*?}', 'equation'),
         
         #(r'\\begin{center.*?\\end{center.*?}', 'center'),
         (r'\\begin{thebibliography.*?\\end{thebibliography.*?}', 'thebibliography'),
@@ -318,12 +326,12 @@ def env_partition(content):
         '\\def','\\Declare', '\\define',
         '\\newcommand', '\\let',
         '\\def', '\\usepackage', "\\affiliation",
-        '\\eqnobysec','\\newenvironment',
+        '\\eqnobysec','\\newenvironment', '\\pdfoutput',
         '\\newtheorem',
         '\\providecommand',
         '\\renewcommand', 
         '\\documentclass',"\\global",'\\setlength','\\newcolumntype',
-        '\\twocolumn',"\\if","\\fi","\\thispagestyle","\\pagerange","\\setcounter","\\makebox"
+        '\\twocolumn',"\\if","\\fi","\\thispagestyle","\\pagerange","\\setcounter","\\makebox","\\global"
     ]
 
     lines = content.splitlines(True)
@@ -369,44 +377,63 @@ def env_partition(content):
     return elements
 
 
-def parse_def(latex_content, commands={}):
+def parse_def(latex_content, command=r'\\def', commands={}):
     # Pattern to extract \def command
-    pattern = re.compile(r'\\def\\(\w+)([^\{]*)\{([^\}]*)\}')
+    pattern = re.compile(command + r'\\(\w+)([^\{]*)\{')
     
-    # Search for matches
-    matches = pattern.finditer(latex_content)
-    for match in matches:
-        command_name = match.group(1)
-        parameter_part = match.group(2)
-        definition = match.group(3)
-
-        # Parse parameters from the parameter part
-        num_params = 0
-        params_pattern = re.compile(r'#(\d+)')
-        params = params_pattern.findall(parameter_part)
-        if params:
-            num_params = max(map(int, params))  # Get the highest parameter number used
-        
-        def replace_param_dollars(match):
-            # Extract the full match which includes the dollar signs and parameters
-            full_match = match.group(0)
-            # Replace starting and ending dollar signs
-            replaced = re.sub(r'^\$', '<dollarsign>', full_match)
-            replaced = re.sub(r'\$$', '<dollarsign>', replaced)
-            return replaced
-
-        # Apply the replacement to the definition
-        param_regex = r'\$(#\d+)+\$'
-        definition = re.sub(param_regex, replace_param_dollars, definition)
-        # Store command in dictionary
-        command = {f"\\\\{command_name}" :{
-            "params": num_params,
-            "definition": definition
-        }}
-        commands = commands|command
-        #print(command)
-
+    # Find the match for the initial part (name and parameters)
+    match = pattern.search(latex_content)
+    if not match:
+        return commands  # No valid \def found
+    
+    # Extract command name
+    command_name = match.group(1)
+    
+    # Parse parameters from the parameter part
+    parameter_part = match.group(2)
+    num_params = 0
+    params_pattern = re.compile(r'#(\d+)')
+    params = params_pattern.findall(parameter_part)
+    if params:
+        num_params = max(map(int, params))  # Get the highest parameter number used
+    
+    # Calculate the start of the definition by finding the next opening brace after the pattern match
+    start_of_definition = latex_content.find('{', match.end()-1) + 1
+    end_of_definition = start_of_definition
+    brace_count = 1
+    
+    # Count braces to find the corresponding closing brace
+    while end_of_definition < len(latex_content) and brace_count > 0:
+        if latex_content[end_of_definition] == '{':
+            brace_count += 1
+        elif latex_content[end_of_definition] == '}':
+            brace_count -= 1
+        end_of_definition += 1
+    
+    # Extract the definition enclosed in the outermost braces
+    definition = latex_content[start_of_definition:end_of_definition-1]
+    #print(f"def=> {command_name} ==> {definition}")
+    
+    def replace_param_dollars(match):
+        # Extract the full match which includes the dollar signs and parameters
+        full_match = match.group(0)
+        # Replace starting and ending dollar signs
+        replaced = re.sub(r'^\$', '<dollarsign>', full_match)
+        replaced = re.sub(r'\$$', '<dollarsign>', replaced)
+        return replaced
+    
+    # Apply the replacement to the definition
+    param_regex = r'\$(#\d+)+\$'
+    definition = re.sub(param_regex, replace_param_dollars, definition)
+    
+    # Store the command in the dictionary
+    commands[f"\\\\{command_name}"] = {
+        "params": num_params,
+        "definition": definition
+    }
     return commands
+
+
 def parse_newcommand_old(latex_content, command=r'\\newcommand', commands={}):
     # Pattern to extract command name, optional parameters
     pattern = re.compile(command+r'(?:{\\(\w+)}|\\(\w+))(\[\d+\])?')
@@ -424,7 +451,7 @@ def parse_newcommand_old(latex_content, command=r'\\newcommand', commands={}):
     # Calculate the start of the definition by adding the length of the matched part to its start index
     start_of_definition = match.end()
     definition = latex_content[start_of_definition:].strip()
-
+    
     # Assuming the definition is correctly enclosed in braces, extract the content within the first level of braces
     brace_counts = {'curly': 0, 'square': 0, 'round': 0}
     definition = definition #[1:-1]  # definition must start with '{' and end with '}'
@@ -456,7 +483,6 @@ def parse_newcommand_old(latex_content, command=r'\\newcommand', commands={}):
         "definition": definition
     }}
 
-import re
 
 def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
     # Improved pattern to extract command name, optional parameters, and their default values
@@ -498,14 +524,13 @@ def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
 
     # Extract the definition enclosed in the outermost braces
     definition = latex_content[start_of_definition:end_of_definition-1]
-
+    #print(f"recommand=> {command_name} ==> {definition}")
     # Store the command in the dictionary
     commands[f"\\\\{command_name}"] = {
         "params": num_params,
         "default": default_value,
         "definition": definition
     }
-
     return commands
 
 def parse_redefine(commands_str,commands = {}):
@@ -528,7 +553,7 @@ def apply_macros(latex_text, commands):
     for command, details in commands.items():
 
         if details['definition'] is None:continue
-        if details['params'] is None:
+        if not details['params']:
             # Direct replacement if there are no parameters
             pattern = regex.escape(command[1:]) + r'(?=\s|\Z|\\|\_|\^|\}|\]|\)|\$)'
             #print(pattern,details['definition'])
@@ -575,11 +600,17 @@ def expand_macro(contents):
             #print(command_str)
             commands = parse_redefine(command_str,commands)
             
+            # for key,val in commands.items():
+            #     print(f"{key} => {val}")
+            # raise
         elif commands: ### <--- may cause unexcep error when replace math
+            
             content = apply_macros(content,commands)
         new_latex_blocks.append(content)
     new_latex_blocks = "\n".join(new_latex_blocks)
     return new_latex_blocks
+
+
 
 
 
@@ -605,9 +636,7 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
     new_blocks = []
     commands={}
     for block_type, block_content in latex_blocks:
-        _, command_line,_ = filter_out_preamble_block(block_content,redefine_commands=redefine_commands, layout_commands=layout_commands,end=" ")
-
-        commands = parse_redefine(command_line,commands)
+        
         # for a,b  in commands.items():
         #     print(a)
         #     print(b)
@@ -623,12 +652,17 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
             
             if color_mode == 'colorful_table_figure':
                 block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{\\definecolor{bgcolor}{RGB}{#2} \\fboxsep=0pt \\fboxrule=0pt \\color{bgcolor} \\fbox{\\colorbox{bgcolor}{\\strut #3}}}""")
+                block_content.insert(-1,"""\\newcommand{\colorfboxx}[3]{\n\\definecolor{bgcolor}{RGB}{#2} \n\\begin{tcolorbox}[colback=bgcolor, colframe=bgcolor, coltext=bgcolor] \n\\strut #3  \n\\end{tcolorbox} \n}""")
             elif color_mode == 'virtual_box_table_figure':
                 block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{\\definecolor{bgcolor}{RGB}{255,255,255} \\fboxsep=0pt \\fboxrule=0pt  \\fbox{\\colorbox{bgcolor}{\\strut #3}}}""")
+                block_content.insert(-1,"""\\newcommand{\colorfboxx}[3]{ \n\\definecolor{bgcolor}{RGB}{255,255,255} \n\\begin{tcolorbox}[colback=bgcolor, colframe=bgcolor, coltext=black] \n\\strut #3  \n\\end{tcolorbox} \n}""")
             new_block_content = "\n".join(block_content)
             new_blocks.append([block_type, new_block_content])
         
         else:
+            _, command_line,_ = filter_out_preamble_block(block_content,redefine_commands=redefine_commands, layout_commands=layout_commands,end=" ")
+
+            commands          = parse_redefine(command_line,commands)
             block_content = apply_macros(block_content, commands)
             if block_type == 'text':
                 ##Find the defination commend and add prefix on them
@@ -638,6 +672,7 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
                 #                                                                     r"\\begin",
                 #                                                                     r"\\end"
                 #                                                                 ])
+
                 envs_blocks = env_partition(block_content)
                 new_blocks.extend(envs_blocks)
                 
@@ -831,34 +866,45 @@ def add_color_box(content):
     color = get_one_color()
     return r"\colorfbox{white}{"+color+"}{" +"\n" + content + "\n" + r"}"
 
+def add_color_box2(content):
+    # Regular expression pattern to find tabular environments and their content.
+    color = get_one_color()
+    return r"\colorfboxx{white}{"+color+"}{" +"\n" + content + "\n" + r"}"
 
-def wrap_tables_with_tcolorbox(content):
+
+def wrap_tables_with_tcolorbox(content, names,captions_string, boxfunction=add_color_box):
     """
-    Wraps LaTeX tables (both \begin{table} and \begin{table*} with optional parameters)
-    in a tcolorbox environment to enhance their visual presentation.
+    Wraps specified LaTeX environments in a tcolorbox environment to enhance their visual presentation.
 
     Args:
-    content (str): The LaTeX document content containing tables.
+    content (str): The LaTeX document content containing environments to wrap.
+    names (list): A list of environment names to wrap.
 
     Returns:
-    str: Modified LaTeX content with tables wrapped in tcolorbox environments.
+    str: Modified LaTeX content with specified environments wrapped in tcolorbox environments.
     """
-    # Regex pattern to find both \begin{table} and \begin{table*} including optional parameters
-    table_pattern = re.compile(r'(\\begin{table\*?}(\[.*?\])?)(.*?)(\\end{table\*?})', re.DOTALL)
+    # Create a regex pattern dynamically based on the provided environment names
+    name = '|'.join(re.escape(b) for b in names) if isinstance(names, list) else names
+    pattern = re.compile(
+        r'\\begin{(?P<env>' + name + r'\*?)}(\[.*?\])?(?P<content>.*?)\\end{\1}',
+        re.DOTALL
+    )
 
     def wrap_with_tcolorbox(match):
-        start_tag_with_params = match.group(1)  # Includes \begin{table} or \begin{table*} with params
-        table_content = match.group(3)          # The actual content inside the table
-        end_tag = match.group(4)                # \end{table} or \end{table*}
+        start_tag_with_params = match.group(0).split(match.group('content'), 1)[0]  # Includes \begin{...} with params
+        table_content = match.group('content')  # The actual content inside the environment
+        end_tag = match.group(0).split(match.group('content'), 1)[1]  # \end{...}
 
-        # Constructing the new table content wrapped in tcolorbox
-        #wrapped_table = f"{start_tag_with_params}\n\\begin{{tcolorbox}}[colframe=blue, colback=white, sharp corners]\n{table_content}\n\\end{{tcolorbox}}\n{end_tag}"
-        wrapped_table = f"{start_tag_with_params}\n"+ add_color_box(table_content) + f"\n{end_tag}"
+        # Constructing the new content wrapped in tcolorbox
+        wrapped_table = f"{start_tag_with_params}\n"+ boxfunction(table_content) + f"\n{captions_string}\n{end_tag}\n"
+        #wrapped_content = f"{start_tag_with_params}\n\\begin{{tcolorbox}}[colframe=blue, colback=white, sharp corners]\n{table_content}\n\\end{{tcolorbox}}\n{end_tag}"
         return wrapped_table
 
-    # Apply the wrapping function to all found table blocks
-    modified_content = table_pattern.sub(wrap_with_tcolorbox, content)
+
+    # Apply the wrapping function to all found blocks
+    modified_content = pattern.sub(wrap_with_tcolorbox, content)
     return modified_content
+
 
 def colorful_inside_brace(content, commend,colorful_fun ):
     return regex.sub(r'\\'+commend+r'(\{(?:[^{}]++|(?1))*\})',  
@@ -955,35 +1001,54 @@ def add_bbl_content(tex_content,tex_file):
         tex_content = re.sub(bib_pattern, lambda match: bbl_content, tex_content)
     return tex_content
 
+def remove_author_optional(latex_content):
+    pattern = r'\\author(\[.*?\])?'
+    replacement = r'\\author'
+    modified_content = re.sub(pattern, replacement, latex_content)
+    return modified_content
 
+def preprocess_latex_content(content):
+    content = remove_author_optional(content)
+
+    # content =  content.replace('\\em ',' ')
+    content =  re.sub(r'\\begin\s+\{', r'\\begin{', content)
+    content =  re.sub(r'\\end\s+\{', r'\\end{', content)
+    return content
 
 def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
     force_redo = args.force_redo
     reference_map_path = os.path.join(os.path.dirname(file_path),'uparxive',"reference_map.json")
-    with open(reference_map_path,'r') as f:
-        origin_reference_map = json.load(f)
+    if os.path.exists(reference_map_path):
+        with open(reference_map_path,'r') as f:
+            origin_reference_map = json.load(f)
+            reference_map = {}
+            for k,reflabels in origin_reference_map.items():
+                k = k.replace('LABEL:','')
+                ref_order = {'reference':0, 'equation':1, 'figure':2, 'table':3, 'section':4}
+                reflabels = sorted(reflabels,key=lambda x: ref_order.get(x[0].lower(),6))
+                ref_type, reftags = reflabels[0]
+                reftags = reftags.strip('[]()')
+                # if ref_type.lower().startswith('missing'):
+                #     continue
+                ### even the tag is missing, we still add it, in this case, the reference is not aligned
+                if ref_type.lower() == 'reference':
+                    reftags = f"[{reftags}]"
+                else:
+                    reftags = f"({reftags})"
+                reference_map[k] = reftags
+            #for k,v in reference_map.items(): print(f"{k}==>{v}")
+    else:
         reference_map = {}
-        for k,reflabels in origin_reference_map.items():
-            k = k.replace('LABEL:','')
-            ref_order = {'reference':0, 'equation':1, 'figure':2, 'table':3, 'section':4}
-            reflabels = sorted(reflabels,key=lambda x: ref_order.get(x[0].lower(),6))
-            ref_type, reftags = reflabels[0]
-            reftags = reftags.strip('[]()')
-            # if ref_type.lower().startswith('missing'):
-            #     continue
-            ### even the tag is missing, we still add it, in this case, the reference is not aligned
-            if ref_type.lower() == 'reference':
-                reftags = f"[{reftags}]"
-            else:
-                reftags = f"({reftags})"
-            reference_map[k] = reftags
-        #for k,v in reference_map.items(): print(f"{k}==>{v}")
-
     content = read_content_with_input(file_path)
     
     lines_without_comments = read_the_tex_file_into_memory_without_comment(content, use_content=True)
     lines_without_comments = [line.strip()+'\n' for line in lines_without_comments]
     content = "".join(lines_without_comments)
+    if args.mode == 'judge_element':
+        if """\\begin{algorithm}""" in content or """\\begin{algorithm*}""" in content or """\\begin{algorithmic}""" in content:
+            return [],True
+        else:
+            return [],False
     content = replace_ref(content, reference_map=reference_map)
     if args.add_bbl:
         content = add_bbl_content(content,file_path)
@@ -994,10 +1059,8 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
     #content = expand_macro(content)
     
     content = expand_macro(content) # <-- this is needed since the \begin environment can also be defined in the newcommand
-    # content =  content.replace('\\em ',' ')
-    content =  re.sub(r'\\begin\s+\{', r'\\begin{', content)
-    content =  re.sub(r'\\end\s+\{', r'\\end{', content)
-    
+    content = preprocess_latex_content(content)
+
     latex_blocks,layerout_blocks = process_latex_content(content,False,args.color_mode)
     output = []
     errortable_path = []
@@ -1017,12 +1080,17 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
             val = val.replace("\\item","\n\\item")
             val = deal_with_one_block_with_math(val, colorful_fun)
             val = remove_affiliation_lines(val)
-        if key in ['table','algorithm','Verbatim']:
+        if key in ['algorithm','Verbatim']:
+            val           = wrap_tables_with_tcolorbox(val,key,"",boxfunction=add_color_box2)
+            #val = add_color_box(val) 
+        if key in ['table']:
             if not args.try_color_table or is_comprehensive_table(val):
                 val, captions = remove_out_the_caption(val)
-                val           = wrap_tables_with_tcolorbox(val)
                 captions_string = "\n".join([f"\\caption{caption}" for caption in captions ])
-                val      = re.sub(r'\\end{table\*?}', lambda m: captions_string + '\n' + m.group(0), val)
+                val           = wrap_tables_with_tcolorbox(val,key,captions_string)
+             
+                
+                #val            = re.sub(r'\\end{table\*?}', lambda m: captions_string + '\n' + m.group(0), val)
                 #print(val)
             else:
                 blockwised_table_string = blockwise_content(val, [(r'\\begin{tabular}.*?\\end{tabular}', 'tabular')])
@@ -1038,8 +1106,7 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
                         tv = r"\begin{tabular}" + parameter + "\n" + remain_content
                     tablelines.append(tv)
                 val = "\n".join(tablelines)
-            
-            
+       
         if key in ['figure','table']: ### for caption
             val = re.sub(r'\\includegraphics.*?(\[.*?\])?\{(.+?)\}', replace_function, val)
             val,captions = remove_out_the_caption(val, lambda match: '\\caption{' + colorful_fun(better_latex_sentense_string(clean_latex_content(match.group(1)[1:-1]))) + '}')
@@ -1138,14 +1205,19 @@ def process_one_file(file_path, args:PrepareColorFulConfig):
         
         return save_path,'AlreadyDone'
     #tqdm.write(file_path)
+    
     errortable_path, output = formularize_latex(file_path,colorful_fun,args)
-    with open(save_path,'w') as f:
-            f.write(output)
-    if len(errortable_path)>0:
-        return file_path,'Error'
+    if args.mode == 'judge_element':
+        status = 'HasAlgorithm' if output else 'NoAlgorithm'
+        return file_path,status
     else:
-        
-        return  save_path,'Success'
+        with open(save_path,'w') as f:
+            f.write(output)
+        if len(errortable_path)>0:
+            return file_path,'Error'
+        else:
+            
+            return  save_path,'Success'
 import traceback
 def process_one_file_wrapper(args:PrepareColorFulConfig):
     file_path, args = args

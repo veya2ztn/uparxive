@@ -18,7 +18,7 @@ if __name__ == '__main__':
     results = process_files(deal_with_one_pdf_file_wrapper, alread_processing_file_list, args)
     
     analysis= {}
-    for arxivid, _type in results:
+    for  _type,arxivid in results:
         if _type not in analysis:
             analysis[_type] = []
         analysis[_type].append(arxivid)

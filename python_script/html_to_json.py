@@ -4,7 +4,7 @@ module_dir = str(Path(__file__).resolve().parent.parent)
 if module_dir not in sys.path:sys.path.append(module_dir)
 
 from uparxive.batch_run_utils import obtain_processed_filelist, process_files,save_analysis
-from uparxive.xml_to_json.html_to_dense_text import HTMLtoJsonConfig, html_to_json_one_path_wrapper
+from uparxive.html_to_json_nougat.html_to_dense_text import HTMLtoJsonConfig, html_to_json_one_path_wrapper
 from simple_parsing import ArgumentParser
 import os
 

@@ -89,14 +89,16 @@ def is_empty(content: List) -> bool:
     """Used to determine if a Section is empty"""
     empty = True
     for part in content:
-        if len(part.strip()):
+        if isinstance(part,dict):
+            empty = False
+            break
+        if  len(part.strip()):
             empty = False
             break
     return empty
-
-
+    
 def format_element(
-    element: Element, keep_refs: bool = False, latex_env: bool = False
+    element: Element, keep_refs: bool = False, structured:bool = False, latex_env: bool = False
 ) -> List[str]:
     """
     Formats a given Element into a list of formatted strings.
@@ -115,24 +117,27 @@ def format_element(
         else:
             return [element.content]
     if isinstance(element, Bold):
-        parts = format_children(element, keep_refs, latex_env)
+        parts = format_children(element, keep_refs, structured=False, latex_env=latex_env)
         if element.find_parent(Algorithm) is not None:
             return parts
         lead, text, tail = leading_trailing_whitespace("".join(parts))
         return [*lead, "**", *remove_line_breaks(text), "**", *tail]
     if isinstance(element, Italic):
-        parts = format_children(element, keep_refs, latex_env)
+        parts = format_children(element, keep_refs, structured=False, latex_env=latex_env)
         if element.find_parent(Algorithm) is not None:
             return parts
         lead, text, tail = leading_trailing_whitespace("".join(parts))
         return [*lead, "_", *remove_line_breaks(text), "_", *tail]
     if isinstance(element, PlaintextMath):
-        return format_children(element, keep_refs) + ["\n"]
+        return format_children(element, keep_refs, structured=False) + ["\n"]
     if isinstance(element, Paragraph):
-        
-        return format_children(element, keep_refs, latex_env) + ["\n\n"]
+        children = format_children(element, keep_refs, structured=structured, latex_env=latex_env)+ ["\n\n"]
+        if structured:
+            return [{"Paragraph": children}]
+        else:
+            return children
     if isinstance(element, TableCell):
-        parts = format_children(element, keep_refs, latex_env)
+        parts = format_children(element, keep_refs, structured=False, latex_env=latex_env)
         remove_trailing_whitespace(parts)
         if element.multirow is not None:
             parts.insert(0, "\\multirow{%i}{*}{" % (element.multirow))
@@ -149,7 +154,7 @@ def format_element(
             parts.append(element.hline_above + "\n")
         parts.extend(
             remove_line_breaks(
-                format_iterator(element.cells, keep_refs, latex_env, join=" & ")
+                format_iterator(element.cells, keep_refs, structured=False, latex_env=latex_env, join=" & ")
             )
         )
         parts.append(r" \\")
@@ -160,7 +165,7 @@ def format_element(
             "\\begin{tabular}",
             "{%s}\n" % element.get_table_spec(),
         ]
-        parts.extend(format_iterator(element.rows, keep_refs, True, join="\n"))
+        parts.extend(format_iterator(element.rows, keep_refs, structured=False, latex_env=True, join="\n"))
         parts.append("\n\\end{tabular}\n")
         return parts
     if isinstance(element, Table):
@@ -168,16 +173,19 @@ def format_element(
             "[TABLE%s]\n\\begin{table}\n"
             % (str(uuid4())[:5] if element.id is None else ":" + str(element.id))
         ]
-        parts.extend(format_children(element, keep_refs, latex_env))
-        caption_parts = format_element(element.caption, keep_refs, latex_env)
+        parts.extend(format_children(element, keep_refs, structured=False, latex_env=latex_env))
+        caption_parts = format_element(element.caption, keep_refs, structured=False, latex_env=latex_env)
         remove_trailing_whitespace(caption_parts)
         parts.append("\\end{table}\n")
         if len(caption_parts) > 0:
             parts.extend(caption_parts + ["\n"])
         parts.append("[ENDTABLE]\n\n")
-        return parts
+        if structured:
+            return [{'Table':parts}]
+        else:
+            return parts
     if isinstance(element, Figure):
-        parts = format_element(element.caption, keep_refs)
+        parts = format_element(element.caption, keep_refs, structured=False)
         remove_trailing_whitespace(parts)
         return (
             [
@@ -192,41 +200,52 @@ def format_element(
         if element.id:
             parts.append(f"{element.id.upper()} ")
         if element.header:
-            header = format_element(element.header, keep_refs)
+            header = format_element(element.header, keep_refs, structured=False)
         else:
-            header = format_iterator(element.children, keep_refs)
+            header = format_iterator(element.children, keep_refs, structured=False)
         _, title, _ = leading_trailing_whitespace("".join(header))
         parts.append(title)
         parts.append("\n\n")
         return parts
     if isinstance(element, Section):
-        children_parts = format_children(element, keep_refs)
+        children_parts = format_children(element, keep_refs, structured=structured)
         if is_empty(children_parts):
-            return []
+            children_parts = []
+
         if element.header:
             parts = [f"\n\n{'#'*element.hnum} "]
-            _, title, _ = leading_trailing_whitespace(
-                "".join(format_element(element.header, keep_refs))
-            )
+            _, title, _ = leading_trailing_whitespace( "".join(format_element(element.header, keep_refs, structured=False)))
             parts.append(title)
             parts.append("\n\n")
+            header_content  = parts
         else:
-            parts = []
-        return parts + children_parts
+            header_content  = []
+        if structured:
+            return  [{"Section": {"header": header_content, "children": children_parts}}]
+        else:
+            return header_content + children_parts
     if isinstance(element, Footnote):
         if element.id is not None:
             foot = f"\n[FOOTNOTE:{element.id}]Footnote {element.id}: "
         else:
             foot = "\n[FOOTNOTE:%s]Footnote: " % (str(uuid4())[:5])
-        return [foot] + format_children(element, keep_refs) + ["[ENDFOOTNOTE]\n\n"]
+        
+        return [foot] + format_children(element, keep_refs, structured=False) + ["[ENDFOOTNOTE]\n\n"]
     if isinstance(element, ListContainer):
-        items = [
-            (
-                item.label,
-                "".join(format_element(item, keep_refs)).strip().replace("\n", " "),
-            )
-            for item in element.items
-        ]
+        items = []
+        for item in element.items:
+            itempart = format_element(item, keep_refs, False)
+            try:
+                itempart = "".join(itempart).strip().replace("\n", " ")
+                itempart = (item.label,itempart,)
+            except:
+                for aaa in itempart:
+                    print(aaa)
+                #print(itempart[0].keys())
+                raise
+            items.append(itempart)
+        
+        
         parts = ["\n"]
         indent = "  " * max(element.level - 1, 0)
         for i, (label, item) in enumerate(items, 1):
@@ -243,11 +262,11 @@ def format_element(
         for child in element.children:
             if isinstance(child, LatexMath):
                 tex = normalize_tex(
-                    "".join(format_element(child, keep_refs)).strip(" \n"), inline=False
+                    "".join(format_element(child, keep_refs, structured=False)).strip(" \n"), inline=False
                 )
                 parts.append(tex)
             else:
-                text = "".join(format_element(child, keep_refs))
+                text = "".join(format_element(child, keep_refs, structured=False))
                 if text:
                     parts.append(text)
         lead, eqs, tail = leading_trailing_whitespace(parts)
@@ -256,7 +275,7 @@ def format_element(
     if isinstance(element, EquationList):
         parts = ["\n"]
         items = element.equations
-        items = ["".join(format_element(item, keep_refs)).rstrip() for item in items]
+        items = ["".join(format_element(item, keep_refs, structured=False)).rstrip() for item in items]
         items = [item + "\n" for item in items if item]
         if items:
             parts.extend(items)
@@ -265,7 +284,7 @@ def format_element(
     if isinstance(element, Algorithm):
         parts = []
         items = element.lines
-        items = ["".join(format_element(item, keep_refs)).rstrip() for item in items]
+        items = ["".join(format_element(item, keep_refs, structured=False)).rstrip() for item in items]
         if element.inline:
             items = [item for item in items if item]
         else:
@@ -280,10 +299,10 @@ def format_element(
     if isinstance(element, DefinitionList):
         parts = ["\n"]
         if element.header is not None:
-            parts.extend(format_element(element.header, keep_refs))
+            parts.extend(format_element(element.header, keep_refs, structured=False))
             parts.append("\n")
         items = [
-            "".join(format_element(item, keep_refs)).rstrip() for item in element.items
+            "".join(format_element(item, keep_refs, structured=False)).rstrip() for item in element.items
         ]
         items = [item + "\n" for item in items if item]
         if items:
@@ -294,13 +313,13 @@ def format_element(
         parts = []
         if element.term is not None:
             term = (
-                "".join(format_element(element.term, keep_refs)).rstrip(" \n\t:") + ": "
+                "".join(format_element(element.term, keep_refs, False)).rstrip(" \n\t:") + ": "
             )
             # maths in wiki might be inside a definition without a term
             if term.strip() != ":":
                 parts.append(term)
         if element.definition is not None:
-            definition = "".join(format_element(element.definition, keep_refs)).rstrip()
+            definition = "".join(format_element(element.definition, keep_refs, False)).rstrip()
             parts.append(definition)
         if parts:
             parts.append("\n")
@@ -321,16 +340,16 @@ def format_element(
             )
             return [content.translate(script_map)]
         else:
-            return format_children(element, keep_refs)
+            return format_children(element, keep_refs, structured=False)
     if isinstance(element, InlineRef):
-        parts = format_children(element, keep_refs)
+        parts = format_children(element, keep_refs, structured=False)
         return parts
-    return format_children(element, keep_refs, latex_env)
-
+    return format_children(element, keep_refs, structured=False, latex_env=latex_env)
 
 def format_iterator(
     iterator: Iterable,
     keep_refs: bool = False,
+    structured:bool = False,
     latex_env: bool = False,
     join: Optional[str] = None,
 ) -> List[str]:
@@ -349,7 +368,7 @@ def format_iterator(
     """
     parts = []
     for child in iterator:
-        parts.extend(format_element(child, keep_refs, latex_env))
+        parts.extend(format_element(child, keep_refs, structured, latex_env))
         if join is not None:
             parts.append(join)
     if join is not None:
@@ -358,13 +377,45 @@ def format_iterator(
 
 
 def format_children(
-    element: Element, keep_refs: bool = False, latex_env: bool = False, collections=None,
+    element: Element, keep_refs: bool = False, structured:bool = False, latex_env: bool = False, collections=None,
 ) -> List[str]:
     if element is None:
         return []
-    children = format_iterator(element.children, keep_refs, latex_env)
+    children = format_iterator(element.children, keep_refs, structured, latex_env)
     return children
 
+def text_beautiful(text):
+    text = text.replace("\xa0", " ")  # replace non-breakable spaces
+    text = re.sub(r" $", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n[\t ]*$", "\n", text, flags=re.MULTILINE)
+    text = re.sub(r"(?<!\n) {2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).lstrip()
+    
+    return text
+
+def get_good_content(parts:list):
+    new_part = []
+    last_part= []
+    for part in parts:
+        if isinstance(part,dict):
+            if len(last_part)>0:
+                new_part.append(text_beautiful("".join(last_part)))
+                last_part = []
+            
+            new_dict_part = {}
+            for key, val in part.items():
+                if key == 'Section':
+                    new_dict_part[key] = {'header':get_good_content(part[key]['header']),
+                                          'children':get_good_content(part[key]['children'])}
+                else:
+                    new_dict_part[key] = get_good_content(val)
+            new_part.append(new_dict_part)
+
+        else:
+            last_part.append(part)
+    if last_part:
+        new_part.append(text_beautiful("".join(last_part)))
+    return new_part
 
 def format_document(
     doc: Document, keep_refs: bool = False
@@ -385,11 +436,7 @@ def format_document(
     parts.append("\n")
     parts.extend(format_children(doc, keep_refs))
     text = "".join(parts)
-    text = text.replace("\xa0", " ")  # replace non-breakable spaces
-    text = re.sub(r" $", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\n[\t ]*$", "\n", text, flags=re.MULTILINE)
-    text = re.sub(r"(?<!\n) {2,}", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text).lstrip()
+    text = text_beautiful(text)
     figures = {unidecode(m[0] + m[1]): m[2].strip() for m in figure_regex.findall(text)}
     text = figure_regex.sub(
         r"[\1\2][END\1]",
@@ -397,4 +444,17 @@ def format_document(
     )
     return text, figures
 
+def format_document_structure(
+    doc: Document, keep_refs: bool = False
+) -> Tuple[str, Dict[str, str]]:
+    
+    parts = []
+
+    if doc.title:
+        parts.extend([*format_element(doc.title), "\n"])
+    parts.append("\n")
+    parts.extend(format_children(doc, keep_refs, structured=True))
+    parts = get_good_content(parts)
+    
+    return parts
 

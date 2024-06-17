@@ -1238,7 +1238,7 @@ def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,ca
     
     sequence2boxed,caption_matched_in_this_page,figid_from_figure, figid_from_caption, pdf_draw_color_bbox_map,color_to_position = get_pdf_text_with_colored(page,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list)
 
-    pretext_and_prompts,true_match,recommand_start = sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_start=recommand_start)
+    pretext_and_prompts,true_match,recommand_start = sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_start=0)
     #all_keys = [k for k in current_mmd_color_dct.keys()]
     #all_keys = all_keys[true_match[-1][2]:]
     #next_current_mmd_color_dct = OrderedDict({k:current_mmd_color_dct[k] for k in all_keys})
@@ -1267,6 +1267,7 @@ def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,ca
     
     return pretext_and_prompts,true_match,recommand_start
 
+globalverbose=False
 from PIL import Image, ImageDraw
 import pandas as pd
 from tqdm.auto import tqdm
@@ -1307,7 +1308,7 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
             # if len(true_match) > 0:start_position += true_match[-1][2]
 
             if pretext_and_prompts == None:
-                tqdm.write(f""" ============ fail to processing page {page_idx} ======================= """)
+                if args.verbose:tqdm.write(f""" ============ fail to processing page {page_idx} ======================= """)
             else:
                 _,_,page_w,page_h = page.rect
                 normed_pretext_and_prompts = []

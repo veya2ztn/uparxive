@@ -116,7 +116,7 @@ def parse_latexml_children(html: BeautifulSoup, parent: Element) -> None:
             parse_latexml_children(child, paragraph)
         elif sv.match(".ltx_tag", child):
             if "ltx_tag_note" not in classes:
-                if sv.match(".ltx_tag_section", child):
+                if sv.match(".ltx_tag_section", child) and child.string:
                     child.string = child.string.upper()
                 elif sv.match(".ltx_tag_subsection", child):
                     child.string = ""
@@ -159,12 +159,14 @@ def parse_latexml_children(html: BeautifulSoup, parent: Element) -> None:
             inline = True
             if "display" in child.attrs:
                 inline = child.attrs["display"] == "inline"
-            tex = child.attrs["alttext"]
-            if inline:
-                tex = rf"\({tex}\)"
-            else:
-                tex = rf"\[{tex}\]"
-            parent.append(LatexMath(code=tex, inline=inline))
+            
+            tex = child.get("alttext")
+            if tex:
+                if inline:
+                    tex = rf"\({tex}\)"
+                else:
+                    tex = rf"\[{tex}\]"
+                parent.append(LatexMath(code=tex, inline=inline))
         elif sv.match("a.ref", child):
             link = parent.append(Link())
             link.target = child.attrs.get("href")
@@ -185,7 +187,7 @@ def parse_latexml_children(html: BeautifulSoup, parent: Element) -> None:
                         parent.append(TextElement(content=potential_num))
                         resolved = True
             if not resolved:
-                raise ValueError("missing reference detected")
+                print(f"[missing reference detected] See {child.prettify()}")
         elif sv.match(
             ".ltx_bibblock, .ltx_role_author, .ltx_contact, .ltx_role_email, .ltx_role_affiliation",
             child,

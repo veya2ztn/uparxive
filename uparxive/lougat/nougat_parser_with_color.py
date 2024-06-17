@@ -189,7 +189,8 @@ def parse_latexml_children(html: BeautifulSoup, parent: Element,color=None) -> N
                         )
                     )
                 else:
-                    raise ValueError('unusable reference "%s"' % text)
+                    #raise ValueError('unusable reference "%s"' % text)
+                    in_ref.append(TextElement(content=text))
                 doc = parent.find_parent(Document)
                 if doc:
                     doc.add_inline_ref(in_ref)
