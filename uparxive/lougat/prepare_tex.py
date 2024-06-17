@@ -246,6 +246,7 @@ def blockwise_content(content, blocks= [
         (r'\\documentclass.*?\\begin{document}', 'preamble'),
         (r'\\begin{abstract}.*?\\end{abstract}', 'abstract'),
         (r'\\begin{fig.*?\\end{fig.*?}', 'figure'),
+        
         (r'\\begin{table.*?\\end{table.*?}', 'table'),
         (r'\\begin{tabular.*?\\end{tabular.*?}', 'table'),
         

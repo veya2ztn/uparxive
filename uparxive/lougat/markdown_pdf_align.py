@@ -175,7 +175,7 @@ def read_and_standardlize_html(html_path): #"/nvme/zhangtianning/datasets/whole_
 
     return html
 
-def extract_captions(text):
+# def extract_captions(text):
     # Regular expression pattern to match content between |caption_start| and |caption_end|
     pattern      = r'\|fig_caption_start\|(.*?)\|fig_caption_end\|'
     fig_captions = re.findall(pattern, text, re.DOTALL)
@@ -187,6 +187,48 @@ def extract_captions(text):
         captions= re.findall(r'\|caption_start\|(.*?)\|caption_end\|', fig_caption, re.DOTALL)
         fig_cap_list.append([figures,captions])
     return text,fig_cap_list
+
+def extract_captions(text):
+    fig_captions = []
+    fig_cap_list = []
+    pos = 0
+    while pos < len(text):
+        start_pos = text.find('|fig_caption_start|', pos)
+        if start_pos == -1:
+            break
+        
+        stack = 1
+        end_pos = start_pos + len('|fig_caption_start|')
+        
+        while end_pos < len(text) and stack > 0:
+            next_start = text.find('|fig_caption_start|', end_pos)
+            next_end = text.find('|fig_caption_end|', end_pos)
+            
+            if next_end == -1:
+                break
+            
+            if next_start != -1 and next_start < next_end:
+                stack += 1
+                end_pos = next_start + len('|fig_caption_start|')
+            else:
+                stack -= 1
+                end_pos = next_end + len('|fig_caption_end|')
+        
+        if stack == 0:
+            fig_caption = text[start_pos:end_pos]
+            fig_captions.append(fig_caption)
+            text = text[:start_pos] + text[end_pos:]
+            pos = start_pos
+        else:
+            break
+    
+    for fig_caption in fig_captions:
+        figures = re.findall(r'\|floats_start\|(.*?)\|floats_end\|', fig_caption, re.DOTALL)
+        captions = re.findall(r'\|caption_start\|(.*?)\|caption_end\|', fig_caption, re.DOTALL)
+        fig_cap_list.append([figures, captions])
+    
+    return text, fig_cap_list
+
 
 def extract_footnote(text):
     # Regular expression pattern to match content between |caption_start| and |caption_end|
