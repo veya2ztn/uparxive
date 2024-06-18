@@ -837,7 +837,7 @@ def get_pdf_path(path):
     name = name+'.pdf'
     return os.path.join(dir,name)
 
-def replace_function(match):
+def replace_boxed_object(match):
     options = match.group(1) if match.group(1) is not None else ""
     old_path = match.group(2)
     #new_path = get_pdf_path(old_path)
@@ -1109,7 +1109,7 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
                 val = "\n".join(tablelines)
        
         if key in ['figure','table']: ### for caption
-            val = re.sub(r'\\includegraphics.*?(\[.*?\])?\{(.+?)\}', replace_function, val)
+            val = re.sub(r'\\includegraphics.*?(\[.*?\])?\{(.+?)\}', replace_boxed_object, val)
             val,captions = remove_out_the_caption(val, lambda match: '\\caption{' + colorful_fun(better_latex_sentense_string(clean_latex_content(match.group(1)[1:-1]))) + '}')
 
         if key in ['section','chapter','subsection','subsubsection']:

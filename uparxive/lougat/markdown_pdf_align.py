@@ -266,6 +266,9 @@ def smart_unicode_to_latex(content):
             raise NotImplementedError(f"not implement for _type={_type}")
     return " ".join(new_content)
 
+def remove_comprehensive_color_mode_in_math(mmd):
+    return re.sub(r"\\definecolor(\s*\[.*?\])?\s*\{[^}]*\}\s*\{\s*rgb\s*}\s*\{[^}]*\}", "", mmd)
+
 ### convert to the markdown text
 def soup2mdtext(html):
 
@@ -275,8 +278,8 @@ def soup2mdtext(html):
     
     mmd, fig = format_document(doc, keep_refs=True)
     #### the latest nougat version will shrink below part in to a single line
-    mmd = re.sub(r"\\definecolor(\s*\[.*?\])?\s*\{[^}]*\}\s*\{\s*rgb\s*}\s*\{[^}]*\}", "", mmd)
-    fig = {k:smart_unicode_to_latex(v) for k,v in fig.items()}
+    mmd = remove_comprehensive_color_mode_in_math(mmd)
+    fig = {k:smart_unicode_to_latex(remove_comprehensive_color_mode_in_math(v)) for k,v in fig.items()}
     #mmd = unicode_to_latex(mmd)
     #mmd = mmd.replace(" '","'")
     
@@ -522,17 +525,23 @@ def   colored_dct(mmd,keep_structure=True,color=(0,0,0)):
                 dct_color = dct_color|line_dct_color
         elif _type == 'block_equation':
             block_content    = block_content.strip()
+            text   = block_content[matheg.block_s:-matheg.block_e]
+            color_in_this_line = re.findall(r'(\[([0-9A-Fa-f]{6})\])', text)
             
-            text             = block_content[matheg.block_s:-matheg.block_e]
-            matches          = re.findall(r'\[([0-9A-Fa-f]{6})\]([^\[]*)', text)
             FirstTimeMeetThisColor= False
-            if matches:
-                if len(set([c for c, _ in matches]))!=1: logging.info(f"why a block equation has more than one color as {matches}")
-                for color, text in matches:
-                    color  = hex_to_rgb(color)
-                    FirstTimeMeetThisColor  = color not in block_equation_color_map
-                    block_equation_color_map[color]= block_equation_color_map.get(color,'') + " " + text
-                block_equation_color_map[color] += '\n'
+            if len(color_in_this_line)>0:
+                
+                if len(set([c for c, _ in color_in_this_line]))!=1: logging.info(f"why a block equation has more than one color as {matches}")
+                color_flag,_ = color_in_this_line[0]
+                color  = hex_to_rgb(color_flag.strip('[]'))
+                if color not in block_equation_color_map:
+                    block_equation_color_map[color]=""
+                else:
+                    block_equation_color_map[color]+="\\\\\n"
+
+                for part_text in text.split(color_flag):
+                    block_equation_color_map[color]+= " " + part_text
+                FirstTimeMeetThisColor  = color not in dct_color
                 if FirstTimeMeetThisColor:
                     dct_color[color_manager.shift(color)] = ["<block_math>",'\n'+block_content[:matheg.block_s]+'\n']
                     dct_color[color] = block_equation_color_map[color]
@@ -619,7 +628,8 @@ def get_information_from_this_pdfcolor(pdf_color,sequence2boxed,color_table_seq_
 
 import numpy as np
 from typing import List,Tuple,Dict,Any
-def rough_split_by_color_pair(sequence_1:List[Tuple[Tuple[int,int,int],str, Any]], sequence_2:List[Tuple[Tuple[int,int,int],str,Any]], level=0):
+def rough_split_by_color_pair(sequence_1:List[Tuple[Tuple[int,int,int],str, Any]], 
+                              sequence_2:List[Tuple[Tuple[int,int,int],str, Any]], level=0):
     color_position_map_1 = {c: i for i, (c,_,_) in enumerate(sequence_1) if c != (0,0,0) and is_meaningful_markdonw_color(c)}
     color_position_map_2 = {c: i for i, (c,_,_) in enumerate(sequence_2) if c != (0,0,0) and is_meaningful_markdonw_color(c)}
     
@@ -635,8 +645,10 @@ def rough_split_by_color_pair(sequence_1:List[Tuple[Tuple[int,int,int],str, Any]
         if color not in color_position_map_2:continue
         
         sequence_2_index = color_position_map_2[color]
-        _ , text_2, _ = sequence_2[sequence_2_index]
-        if text_2.strip().lower() == text_1.strip().lower():
+        _ , text_2, _type= sequence_2[sequence_2_index]
+        if text_2.strip().lower() == text_1.strip().lower() or _type=='<inline_math>':
+            ### this equal is for the line break case
+            ### if the text_2 is a symbol inline math, it match skip the match between \mathcal{A} and A
             if ((last_record_sequence_2_start <= sequence_2_index and last_record_sequence_1_start <= sequence_1_index) and
                 not (last_record_sequence_2_start==sequence_2_index and last_record_sequence_1_start==sequence_1_index)): 
                 pair.append(["need", last_record_sequence_2_start, sequence_2_index, last_record_sequence_1_start, sequence_1_index])
@@ -648,18 +660,22 @@ def rough_split_by_color_pair(sequence_1:List[Tuple[Tuple[int,int,int],str, Any]
     not (last_record_sequence_2_start==sequence_2_index and last_record_sequence_1_start==sequence_1_index)): 
         sequence_2_index = last_record_sequence_2_start + sequence_1_index - last_record_sequence_1_start
         pair.append(["need", last_record_sequence_2_start, sequence_2_index, last_record_sequence_1_start, sequence_1_index])
-        
+    
+    sequence_2_index = pair[-1][2]
+    if sequence_2_index < len(sequence_2):
+        pair.append(["delete", sequence_2_index, len(sequence_2), sequence_1_index, sequence_1_index])
     ### below case may produce extra need match since it cannot handle later match before case 
     ### in such a case, all the before word in sequence 2 will get deleted mark since it wont match at that monoment
     ### lets do a post fix, it may have a more efficient code way
     new_pair = []
     for tag, i1,i2,j1,j2 in pair:
+        
         if tag =='aligned':
             new_pair.append((tag, i1,i2,j1,j2))
         else:
             ### we just pop out those keys that has matched in old case
             i1_start = i1 
-            i2 = min(len(sequence_2)-1, i2)
+            i2 = min(len(sequence_2), i2)
             matched_i = [i1_end for i1_end in range(i1, i2) if sequence_2[i1_end][0] in color_once_matched]
             if len(matched_i) > 0:
                 new_pair.append((tag, i1_start,min(matched_i),j1,j2 ))
@@ -1193,8 +1209,14 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_
     color_index_in_pdf = [color_indexes_map[color] for color,_,_ in sequence_pdf if color !=(0,0,0) and color in color_indexes_map] ### some color may appear in caption, then pass
     if len(color_index_in_pdf)==0: return None, None,0
     
+
     mmd_sequence_start  = max(max(0,min(color_index_in_pdf)-1),recommand_start)
-    sequence_mmd = [(color, text, dtype) for color, text, dtype in sequence1o[mmd_sequence_start:max(color_index_in_pdf)+1]]
+    while mmd_sequence_start>0 and "math" in sequence1o[mmd_sequence_start][-1]:
+        mmd_sequence_start-=1
+    mmd_sequence_end    = min(len(sequence1o)-1, max(color_index_in_pdf[1:])+1)
+    while mmd_sequence_end<len(sequence1o) and "math" in sequence1o[mmd_sequence_end][-1]:
+        mmd_sequence_end+=1
+    sequence_mmd = [(color, text, dtype) for color, text, dtype in sequence1o[mmd_sequence_start:mmd_sequence_end]]
 
     sequence1=sequence_mmd
     sequence2=sequence_pdf
@@ -1253,17 +1275,17 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_
 
     ### remove the delete case from end which due to the len(marddown) > len(currentpage)
     if align_side == 'left':
-        while true_match[-1][0] == 'delete':
+        while true_match[-1][0] == 'delete' and 'math' not in sequence_mmd[true_match[-1][2]-1][2]:
             true_match.pop(-1)
     else:
-        while true_match[-1][0] != 'aligned':
+        while true_match[-1][0] != 'aligned' and 'math' not in sequence_mmd[true_match[-1][2]-1][2]:
             true_match.pop(-1)
-
     
     ############## final match align ##################
     now_we_add_postion_in_mmd = mmd_sequence_start + true_match[-1][1]
     pretext_and_prompts = generate_final_match_table(true_match, sequence1, sequence2, verbose_level=1)
     return pretext_and_prompts, true_match, now_we_add_postion_in_mmd
+
 
 def invisable_symbol(text,_type):
     return _type in ['<inline_math>', '<block_math>', '<blockmath>'] or is_this_part_is_invisable_symbol_in_markdown(text)
@@ -1313,6 +1335,7 @@ globalverbose=False
 from PIL import Image, ImageDraw
 import pandas as pd
 from tqdm.auto import tqdm
+fitz.TOOLS.mupdf_display_errors(on=False)
 def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     if args.verbose: print(f"we start reading coloed markdown from {html_path}")
     (mmd,
