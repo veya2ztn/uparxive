@@ -336,6 +336,21 @@ def partition_latex_blocks(latex_input):
     return blocks
 
 def simple_math_color_format(latex_input):
+    result = simple_math_color_format_normal(latex_input)
+    should_no_color_in_content = True
+    for color, text in result:
+        if "\\color" in text:
+            should_no_color_in_content = False
+            break
+    if not should_no_color_in_content:
+        try:
+            result = simple_math_color_format_nested(latex_input)
+            return result
+        except:
+            return result
+    return result
+
+def simple_math_color_format_normal(latex_input):
     # Pattern to match `{...}` containing `\color[rgb]{a,b,c}`
     pattern = r'\{(\s*\\color\s*\[\s*rgb\s*\]\s*\{\s*([^}]+?)\s*\}[^}]*)\}'
     
@@ -371,6 +386,49 @@ def simple_math_color_format(latex_input):
         if (prev_line.strip() and curr_line.strip()) and not (prev_line.strip()[-1].isalnum() and curr_line.strip()[0].isalnum()):
             result[i-1] = (result[i-1][0], prev_line.rstrip())
             result[i]   = (  result[i][0], curr_line.lstrip())
+    return result
+
+def simple_math_color_format_nested(latex_input):
+    """
+    fail case such as -}}{\color[rgb]{0.90234375,0.55078125,0.17578125 }+}{ \color[rgb]{0.90234375,0.55078125,0.1953125}\gamma} in 2009/2009.09717
+    """
+    def extract_color_text(text,deepth=0):
+        assert deepth<10, f"deepth={deepth}, please check {text}"
+        pattern = r'\\color\s*\[\s*rgb\s*\]\s*\{\s*([^}]+?)\s*\}'
+        result = []
+        last_end = 0
+
+        for match in re.finditer(pattern, text):
+            start, end = match.span()
+
+            if start > last_end:
+                result.append((None, text[last_end:start].strip() + ' '))
+
+            rgb_string = match.group(1)
+            rgb_values = rgb_string.split(',')
+            R, G, B = (round(float(value) * 255) for value in rgb_values)
+
+            nested_result = extract_color_text(text[end:],deepth=deepth+1)
+            cleaned_text  = nested_result[0][1] if nested_result else ''
+
+            result.append(((R, G, B), cleaned_text.strip() + ' '))
+            last_end = end + len(cleaned_text)
+
+        if last_end < len(text):
+            result.append((None, text[last_end:]))
+
+        return result
+
+    result = extract_color_text(latex_input)
+
+    for i in range(1, len(result)):
+        prev_line = result[i-1][1] if result[i-1][1] else ''
+        curr_line = result[i][1] if result[i][1] else ''
+
+        if (prev_line.strip() and curr_line.strip()) and not (prev_line.strip()[-1].isalnum() and curr_line.strip()[0].isalnum()):
+            result[i-1] = (result[i-1][0], prev_line.rstrip())
+            result[i] = (result[i][0], curr_line.lstrip())
+
     return result
 
 def blockwise_content(content, blocks):
@@ -545,7 +603,7 @@ def   colored_dct(mmd,keep_structure=True,color=(0,0,0)):
                 if FirstTimeMeetThisColor:
                     dct_color[color_manager.shift(color)] = ["<block_math>",'\n'+block_content[:matheg.block_s]+'\n']
                     dct_color[color] = block_equation_color_map[color]
-                    dct_color[color_manager.shift(color)] = ["<block_math>",block_content[-matheg.block_e:]+'\n']
+                    dct_color[color_manager.shift(color)] = ["<block_math>",'\n'+block_content[-matheg.block_e:]+'\n']
                 else:
                     dct_color[color] = block_equation_color_map[color]
             else:
@@ -789,6 +847,12 @@ def get_opcodes(sequence1, sequence2):
         print("===================")
         sequence1 = ['\\(', '\\{CFL']
         sequence2 = ['CFL']
+        opcodes = get_opcodes(sequence1, sequence2)
+        for opcode in opcodes:
+            print(opcode)
+        ============ below case failed ============
+        sequence1 = ['}|']
+        sequence2 = ['|']
         opcodes = get_opcodes(sequence1, sequence2)
         for opcode in opcodes:
             print(opcode)
@@ -1128,7 +1192,7 @@ def generate_final_match_table(true_match, sequence1o, sequence2boxed, verbose_l
                 pretext_and_prompts.append([markdown_text, pdf_text, "invisable" ,markdown_type, None])
             elif any([isinstance(c,float) for c in color]):
 
-                if all([t['color']==0 for t in pdf_color_box]):
+                if all([(t[0] in [0,(0,0,0)]) for t in pdf_color_box]):
                     ### this mean there is symbol in markdown is not get colored by pdf engine like µ
                     ### lets put it back to last markdown slot
                     ##### since we pre caption already, this still should not appear here 
@@ -1258,9 +1322,14 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_
                 continue
             if len(seq1) == 0 and len(seq2) == 0:
                 continue
-                
-            for tag, i1_now, i2_now, j1_now, j2_now in get_real_match(seq1, seq2):
-                true_match.append([tag,i1+i1_now, i1+i2_now,j1+j1_now, j1+j2_now])
+            
+            if len(seq1) ==1 and len(seq2) == 1: # and 'math' in sequence1[i1][-1]:
+                ### this is a single word match
+                ### when it appear, it means the texted 被夹在两个匹配项之间，
+                true_match.append(('equal', i1, i2, j1, j2))
+            else:
+                for tag, i1_now, i2_now, j1_now, j2_now in get_real_match(seq1, seq2):
+                    true_match.append([tag,i1+i1_now, i1+i2_now,j1+j1_now, j1+j2_now])
         else:
             true_match.append([tag,i1, i2,j1, j2])
     
