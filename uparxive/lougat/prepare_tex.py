@@ -246,7 +246,7 @@ def blockwise_content(content, blocks= [
         (r'\\documentclass.*?\\begin{document}', 'preamble'),
         (r'\\begin{abstract}.*?\\end{abstract}', 'abstract'),
         (r'\\begin{fig.*?\\end{fig.*?}', 'figure'),
-        
+        (r'\\begin{description}.*?\\end{description}', 'equation'),
         (r'\\begin{table.*?\\end{table.*?}', 'table'),
         (r'\\begin{tabular.*?\\end{tabular.*?}', 'table'),
         
@@ -965,6 +965,7 @@ def remove_the_bib(tex_content):
     if isusebiblio:
         # Replace the \bibliography command with the contents of bbl_content
         tex_content = re.sub(bib_pattern, "\n", tex_content)
+    
     return tex_content
 
 def add_bbl_content(tex_content,tex_file):
@@ -1010,7 +1011,6 @@ def remove_author_optional(latex_content):
 
 def preprocess_latex_content(content):
     content = remove_author_optional(content)
-
     # content =  content.replace('\\em ',' ')
     content =  re.sub(r'\\begin\s+\{', r'\\begin{', content)
     content =  re.sub(r'\\end\s+\{', r'\\end{', content)
@@ -1075,6 +1075,7 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
                 val = colorful_inside_brace( val,commend,colorful_fun)
             if key == 'preamble':
                 val = "\n".join(re.split(r'\n\s*\n', val))
+        
         if key in ["text","abstract"]:
             #### 
             
@@ -1123,15 +1124,17 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
             val = colored_word(val) if colorful_fun!=identity else val #replace_equation_content(val) if colorful_fun!=identity else val
             #val = add_color_box(val) if colorful_fun!=identity else val 
         if key in ['thebibliography']:
+            if not args.add_bbl:continue
             ### use re split by \bibitem
             lines = []
-            for line in  re.split(r'(?=\\bibitem)', val):
-                if '\\bibitem' in line:
+            for iiii,line in  enumerate(re.split(r'(?=\\bibitem\b)', val)):
+                # if iiii>2:break
+                # print(line)
+                # print("==================")
+                if line.startswith('\\bibitem'):
                     #line = better_latex_sentense_string(clean_latex_content(line))
                     #line = colorful_fun(line)
                     line = deal_with_one_block_with_math(line, colorful_fun)
-
-                
                 lines.append(line)
            
             val = "\n".join(lines)

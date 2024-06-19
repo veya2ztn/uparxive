@@ -21,7 +21,7 @@ class BatchModeConfig:
     debug:bool=False
     verbose: bool = False
     ray_nodes: List[int] = None
-
+    debug: bool = False
 
     def from_dict(kargs):
         return BatchModeConfig(**kargs)
@@ -31,42 +31,18 @@ class BatchModeConfig:
 
 
 def process_files(func, file_list, args:BatchModeConfig):
-    if args.ray_nodes:
-        assert args.index_part == 0 and args.num_parts == 1, "Please do not partition filelist when use Ray mode. We will automatively do it"
-        import ray
-        ray.init(address='auto')
-        @ray.remote
-        def general_task(config):
-            with Pool(processes=args.batch_num) as pool:
-                args_list = [(file, config) for file in file_list]
-                results = list(tqdm(pool.imap(func, args_list), total=len(file_list)))
-            return results
-        node_resources = [{node: 1} for node in args.ray_nodes]  # Define resources for each node type
-        for index, resources in enumerate(node_resources):
-            args.ray_nodes = None
-            args.index_part=index
-            args.num_parts =len(node_resources)
-            result = general_task.options(resources=resources).remote(args)
-            results.append(result)
-        # Retrieve and print results
-        for result in results:
-            a=ray.get(result)
-            if isinstance(a,str):
-                print(a)
-        ray.shutdown()
-        return [] ### lets do not return the results
-    else:
-        num_processes = args.batch_num
-        if num_processes == 0:
-            results = []
-            for arxivpath in tqdm(file_list):
-                results.append(func((arxivpath, args)))
-            return results
-        else:
-            with Pool(processes=num_processes) as pool:
-                args_list = [(file, args) for file in file_list]
-                results = list(tqdm(pool.imap(func, args_list), total=len(file_list)))
+    
+    num_processes = args.batch_num
+    if num_processes == 0:
+        results = []
+        for arxivpath in tqdm(file_list):
+            results.append(func((arxivpath, args)))
         return results
+    else:
+        with Pool(processes=num_processes) as pool:
+            args_list = [(file, args) for file in file_list]
+            results = list(tqdm(pool.imap(func, args_list), total=len(file_list)))
+    return results
 
 
 def obtain_processed_filelist(args:BatchModeConfig):

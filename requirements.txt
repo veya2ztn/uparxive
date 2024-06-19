@@ -9,3 +9,11 @@ elasticsearch
 grobid-client-python
 simple_parsing
 ray
+TeXSoup
+pymupdf
+pymupdf
+diff_match_patch
+regex
+latex2mathml
+htmlmin
+pylatexenc

@@ -110,7 +110,7 @@ def encapsulate_command_arguments(text):
 mathfunction = [
         r'\\bar', r'\\overline', r'\\mathfrak', r'\\mathbb',
         r'\\script', r'\\mathscr', r'\\code',  r'\\cancel',
-        r'\\dot', r'\\vector', r'\\ddot', r'\\vec', r'\\mathrm',r'\\text'
+        r'\\dot', r'\\vector', r'\\ddot', r'\\vec', r'\\mathrm',r'\\text',r'\\SI'
     ]
 
 
@@ -118,7 +118,7 @@ import latex2mathml.commands as commands
 from TexSoup.utils import Token
 from TexSoup.data import BraceGroup,TexCmd,TexArgs,BracketGroup,TexNamedEnv
 from TexSoup import TexSoup
-default_use_adjoint_char_math_func = set(commands.COMMANDS_WITH_ONE_PARAMETER)|set(commands.LOCAL_FONTS.keys())
+default_use_adjoint_char_math_func = set(commands.COMMANDS_WITH_ONE_PARAMETER)|set(commands.LOCAL_FONTS.keys())|{'\\SI'}
 single_char_math_symbol = MATH
 
 def deal_with_one_envs(elements):
@@ -302,7 +302,8 @@ def treat_seg(seg):
             
             # 需要和后面[]*{}内容一起保留原样的tag
             elif word in ['\\label','\\begin','\\end','\\includegraphics','\\resizebox','\\cline','\\multicolumn','\\multirow','\\pagestyle','\\email',
-                            '\\input','\\bibliographystyle','\\bibliography','\\newcommand','\\usepackage','\\preprint','\\ref','\\url','\\bibitem','\\bibinfo','\\bibnamefont'] \
+                            '\\input','\\bibliographystyle','\\bibliography','\\newcommand','\\usepackage','\\preprint','\\ref','\\url','\\bibitem','\\bibinfo','\\bibnamefont',
+                            '\\SI','\\ang'] \
                             or any(banword in word for banword in ['\\cite','\\ref','hspace','vspace']):  # \\citep,\\citen,\\hspace*
                 ignore_res = re.match(r'\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\}){1,2}',seg[seg_idx:])
                 new_seg += ignore_res.group(0) if ignore_res else word

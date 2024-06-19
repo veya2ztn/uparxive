@@ -18,8 +18,9 @@ from tqdm.auto import tqdm
 
 def process_one_file(file_path, args:BatchModeConfig):
     targetname = get_pdf_name(file_path)
+    
     targetpath = os.path.join(os.path.dirname(file_path), 'temp', targetname)
-
+    
 
     if os.path.exists(targetpath) and not args.redo:return file_path, "Skip"
     #tqdm.write(file_path)
@@ -30,7 +31,7 @@ def process_one_file(file_path, args:BatchModeConfig):
             )
     while True:
         line = process.stdout.readline()
-        if 'SIGTERM' in line or 'Fail' in line or 'Error' in line:
+        if 'SIGTERM' in line:
             process.kill()
             return file_path, "Fail"
         if not line:  # If readline returns an empty bytes object, the process has finished

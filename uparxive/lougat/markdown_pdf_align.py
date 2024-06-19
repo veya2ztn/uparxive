@@ -1,6 +1,6 @@
-from nougat.dataset.parser.html2md import format_document,htmlmin
+from .nougat.dataset.parser.html2md import format_document,htmlmin
 from .nougat_parser_with_color import parse_latexml,get_color_from_style
-from nougat.dataset.utils import unicode_to_latex
+from .nougat.dataset.utils import unicode_to_latex
 import fitz, math,re,json, os,difflib
 from collections import OrderedDict
 from .utils import *
@@ -551,7 +551,11 @@ def  color_dct_line(line,color,keep_structure,color_manager):
             dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[:matheg.inline_s]]
             for c,text in simple_math_color_format(block_content[matheg.inline_s:-matheg.inline_e]):
                 if c and c!=(0,0,0):
-                    assert c not in dct_color or len(text.strip())==0, f"color should be unique {c}"
+                    assert c not in dct_color or len(text.strip())==0, f"""
+                    color should be unique {c}, what we get now is 
+                    old text: {dct_color[c]}
+                    new text: {text}
+                    """
                     dct_color[c] = ["<inline_math>",text]
                     color = c
                 else:
