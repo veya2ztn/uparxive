@@ -21,6 +21,8 @@ class PrepareColorFulConfig(BatchModeConfig):
     try_color_table: bool = False
     add_bbl:bool = False
     color_mode:str ='colorful_table_figure'
+    autoinitial:bool = True
+    remove_affiliation: bool = False
 
     def __post_init__(self):
         if not self.do_colorful:
@@ -110,6 +112,8 @@ def replace_ref(content, reference_map):
         r'\\citet(\{(?:[^{}]++|(?1))*\})',
         r'\\citep(\{(?:[^{}]++|(?1))*\})',
         r'\\newcite(\{(?:[^{}]++|(?1))*\})',
+        r'\\onlinecite(\{(?:[^{}]++|(?1))*\})',
+        r'\\wcite(\{(?:[^{}]++|(?1))*\})',
         r'\\ref(\{(?:[^{}]++|(?1))*\})',
         r'\\pageref(\{(?:[^{}]++|(?1))*\})',
 
@@ -255,6 +259,7 @@ def blockwise_content(content, blocks= [
         (r'\\begin{Verbatim.*?\\end{Verbatim.*?}', 'Verbatim'),
         (r'\\begin{widetext.*?\\end{widetext.*?}', 'equation'),
         (r'\\begin{flalign.*?\\end{flalign.*?}', 'equation'),
+        (r'\\begin{subequation.*?\\end{subequation.*?}', 'equation'),
         
         #(r'\\begin{center.*?\\end{center.*?}', 'center'),
         (r'\\begin{thebibliography.*?\\end{thebibliography.*?}', 'thebibliography'),
@@ -479,6 +484,7 @@ def parse_newcommand_old(latex_content, command=r'\\newcommand', commands={}):
     # Apply the replacement to the definition
     param_regex = r'\$(#\d+)+\$'
     definition = re.sub(param_regex, replace_param_dollars, definition)
+    definition = apply_macros(definition, commands)
     return commands|{r"\\"+command_name: {
         "params": num_params,
         "definition": definition
@@ -525,6 +531,7 @@ def parse_newcommand(latex_content, command=r'\\newcommand', commands={}):
 
     # Extract the definition enclosed in the outermost braces
     definition = latex_content[start_of_definition:end_of_definition-1]
+    definition = apply_macros(definition, commands)
     #print(f"recommand=> {command_name} ==> {definition}")
     # Store the command in the dictionary
     commands[f"\\\\{command_name}"] = {
@@ -601,9 +608,7 @@ def expand_macro(contents):
             #print(command_str)
             commands = parse_redefine(command_str,commands)
             
-            # for key,val in commands.items():
-            #     print(f"{key} => {val}")
-            # raise
+            
         elif commands: ### <--- may cause unexcep error when replace math
             
             content = apply_macros(content,commands)
@@ -646,6 +651,7 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
         if block_type == 'preamble':
             block_content = block_content.split('\n')
             block_content.insert(-1,r"\usepackage[most]{tcolorbox}")
+            block_content.insert(-1,r"\usepackage{xcolor}")
             ## below for color board for colorfbox
             #block_content.insert(-1,"""\\newcommand{\\colorfbox}[3]{ \\fboxsep=0pt \\fboxrule=1pt \\extractRGB{#2} \\fbox{\\colorbox{#1}{\\strut #3}}}""")
             ## below for color backgroud for colorfbox
@@ -814,14 +820,40 @@ def remove_out_the_caption(content, replaced_element="\n"):
     return content,captions
 
 
-def remove_affiliation_lines(text):
-    # Split the text into lines
-    lines = text.splitlines()
-    # Filter out lines that start with \affiliation
-    filtered_lines = [line for line in lines if not line.lstrip(r"\\").startswith(r'affiliation')]
-    # Join the remaining lines back into a single string
-    result_text = '\n'.join(filtered_lines)
-    return result_text
+def remove_affiliation_lines(content):
+    command_pattern = re.compile(
+        r'\\(affiliation)\s*\{',
+        re.DOTALL
+    )
+    
+    def get_match_end(content):
+        stack = ['{']
+        i = 0
+
+        while i < len(content):
+            if content[i] == '{':
+                stack.append('{')
+            elif content[i] == '}':
+                stack.pop()
+                if not stack:
+                    end = i + 1
+                    break
+            i += 1
+        return end
+
+    # Process all matches
+    while True:
+        match = command_pattern.search(content)
+        if not match:
+            break
+        intervel = get_match_end(content[match.end():])
+        content = content[:match.start()] + content[match.end()+intervel:]
+    
+    # Additional replacements
+    
+    
+    return content
+   
 
 
 def get_pdf_path(path):
@@ -1014,6 +1046,11 @@ def preprocess_latex_content(content):
     # content =  content.replace('\\em ',' ')
     content =  re.sub(r'\\begin\s+\{', r'\\begin{', content)
     content =  re.sub(r'\\end\s+\{', r'\\end{', content)
+    content = content.replace('\\newblock', "").replace("\\em", "").replace('\\~', ' ')
+    content = content.replace("\\tableofcontents", "") ### we can not handle content
+    #content = expand_macro(content)
+    
+    
     return content
 
 def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
@@ -1056,17 +1093,18 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
     else:
         content = remove_the_bib(content)
     #content = expand_newcommand_in_latex(content)
-    content = content.replace("\\tableofcontents", "") ### we can not handle content
-    #content = expand_macro(content)
     
     content = expand_macro(content) # <-- this is needed since the \begin environment can also be defined in the newcommand
+    
     content = preprocess_latex_content(content)
+    if args.remove_affiliation: content = remove_affiliation_lines(content)
+    
 
     latex_blocks,layerout_blocks = process_latex_content(content,False,args.color_mode)
     output = []
     errortable_path = []
     table_order = 0
-
+    after_preamble = False
     for key,val in latex_blocks:
         output.append(f"%vvvvvvvvvvvvvvvvvvvvvvv {key} vvvvvvvvvvvvvvvvvvvvvvvvv")
         
@@ -1075,13 +1113,16 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
                 val = colorful_inside_brace( val,commend,colorful_fun)
             if key == 'preamble':
                 val = "\n".join(re.split(r'\n\s*\n', val))
-        
+                #val,affiliation,_ = remove_affiliation_lines(val)
+                after_preamble = True
+        if not after_preamble:continue
         if key in ["text","abstract"]:
             #### 
             
             val = val.replace("\\item","\n\\item")
             val = deal_with_one_block_with_math(val, colorful_fun)
-            val = remove_affiliation_lines(val)
+            #val,affiliation,_ = remove_affiliation_lines(val)
+            #val = remove_affiliation_lines(val)
         if key in ['algorithm','Verbatim']:
             val           = wrap_tables_with_tcolorbox(val,key,"",boxfunction=add_color_box2)
             #val = add_color_box(val) 
@@ -1188,6 +1229,7 @@ def get_the_resource_path(file_path, args):
 
     return redownload_P, 'ResrouceList'
 
+import shutil
 def process_one_file(file_path, args:PrepareColorFulConfig):
     if args.mode == 'remove_color_mask':
 
@@ -1215,6 +1257,12 @@ def process_one_file(file_path, args:PrepareColorFulConfig):
         status = 'HasAlgorithm' if output else 'NoAlgorithm'
         return file_path,status
     else:
+        tempfile = os.path.join(os.path.dirname(file_path),'temp')
+        if args.autoinitial and os.path.exists(tempfile):
+            if args.verbose:
+                tqdm.write(f"remove the temp folder {tempfile} since we change the source tex")
+            shutil.rmtree(tempfile)
+
         with open(save_path,'w') as f:
             f.write(output)
         if len(errortable_path)>0:

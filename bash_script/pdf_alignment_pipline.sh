@@ -17,7 +17,7 @@ processed=0
 # Read the filelist line by line
 while IFS= read -r texfilepath
 do
-
+    
     # If the counter is greater than or equal to the index and less than the end_index
     if [ "$counter" -ge "$index" ] && [ "$counter" -lt "$end_index" ]; then
         #Search for .tex files in the directory
@@ -78,4 +78,4 @@ do
     fi
 done < "$filelist"
 
-echo "\n"
+echo "done"

@@ -26,7 +26,7 @@ class MarkdownPDFalignedConfig(BatchModeConfig):
     redo : bool = False
     task_name = 'md_pdf_aligned'
     debug  : bool = False
-
+    save_boxed_image : bool = False
 
 class MathManager:
     inline_start = '<inline_start>'
@@ -1404,6 +1404,41 @@ def deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,ca
     
     return pretext_and_prompts,true_match,recommand_start
 
+def save_clean_and_boxed_image(page0,page_idx,png_dir,normed_pretext_and_prompts):
+    
+    os.makedirs(png_dir,exist_ok=True)
+    clean_png_path = os.path.join(png_dir, 'clean',f"page_{page_idx}.png")
+    os.makedirs(os.path.dirname(clean_png_path),exist_ok=True)
+    with open(clean_png_path, "wb") as f:
+        f.write(page0.get_pixmap(dpi=300).pil_tobytes(format="PNG"))      
+    img = Image.open(clean_png_path)
+    for markdown, pdf_text, status, text_type, box in normed_pretext_and_prompts:
+        if box is None:continue
+        
+        #if len(text_and_box)!=2:logging.debug(text_and_box)
+        #text, box = text_and_box
+        #if box is None:logging.debug(text_and_box)
+        if len(box[0])!=2 or len(box[1])!=2: continue
+        bbox = box
+        width, height = img.size
+
+        # Convert bbox from normalized to pixel coordinates
+        pixel_bbox = [
+            bbox[0][0] * width,  # xmin
+            bbox[0][1] * height, # ymin
+            bbox[1][0] * width,  # xmax
+            bbox[1][1] * height  # ymax
+        ]
+
+        # Create a draw object
+        draw = ImageDraw.Draw(img)
+
+        # Draw the rectangle
+        draw.rectangle(pixel_bbox, outline='red', width=2)
+        
+    boxed_image = os.path.join(png_dir, 'boxed',f"boxed_page_{page_idx}.png")
+    os.makedirs(os.path.dirname(boxed_image),exist_ok=True)
+    img.save(boxed_image)
 globalverbose=False
 from PIL import Image, ImageDraw
 import pandas as pd
@@ -1427,17 +1462,13 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     pdf      = fitz.open(pdf_file_path)
     pdf0     = fitz.open(now_table_figure_masked_pdf)
     png_dir  = os.path.join(os.path.dirname(os.path.dirname(pdf_file_path)),'boxed_pdf_image')
-    os.makedirs(png_dir,exist_ok=True)
-    
+
     whole_markdown=""
     recommand_start = 0
     for page_idx in range(len(pdf)):
         page = pdf[page_idx]
         page0=pdf0[page_idx]
-        clean_png_path = os.path.join(png_dir, 'clean',f"page_{page_idx}.png")
-        os.makedirs(os.path.dirname(clean_png_path),exist_ok=True)
-        with open(clean_png_path, "wb") as f:
-            f.write(page0.get_pixmap(dpi=300).pil_tobytes(format="PNG"))      
+        
 
         current_mmd_color_dct =mmd_color_dct
         try:
@@ -1456,48 +1487,19 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
                     normed_pretext_and_prompts.append([markdown, pdf_text, status, text_type, bbox])
                 if args.verbose:
                     tqdm.write(f""" ============= for page {page_idx}, we get {len(normed_pretext_and_prompts)} box =================== """)
-                img = Image.open(clean_png_path)
-
-                for markdown, pdf_text, status, text_type, box in normed_pretext_and_prompts:
-                    if box is None:continue
-                    
-                    #if len(text_and_box)!=2:logging.debug(text_and_box)
-                    #text, box = text_and_box
-                    #if box is None:logging.debug(text_and_box)
-                    if len(box[0])!=2 or len(box[1])!=2: continue
-                    bbox = box
-                    width, height = img.size
-
-                    # Convert bbox from normalized to pixel coordinates
-                    pixel_bbox = [
-                        bbox[0][0] * width,  # xmin
-                        bbox[0][1] * height, # ymin
-                        bbox[1][0] * width,  # xmax
-                        bbox[1][1] * height  # ymax
-                    ]
-
-                    # Create a draw object
-                    draw = ImageDraw.Draw(img)
-
-                    # Draw the rectangle
-                    draw.rectangle(pixel_bbox, outline='red', width=2)
-                    
-                boxed_image = os.path.join(png_dir, 'boxed',f"boxed_page_{page_idx}.png")
-                os.makedirs(os.path.dirname(boxed_image),exist_ok=True)
-                img.save(boxed_image)
+                
                 
                 boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.csv")
                 os.makedirs(os.path.dirname(boxed_info),exist_ok=True)
                 df = pd.DataFrame(normed_pretext_and_prompts, columns=['markdown','pdf','status','text_type','bbox'])
                 df.to_csv(boxed_info)
-                # boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.jsonl")
-                # boxed_dict  = [{'text':t, 'bbox':b} for t,b in normed_pretext_and_prompts]
-                # with open(boxed_info,'w') as f:
-                #     json.dump(boxed_dict, f)
-
+  
                 for text, _, _, text_type, bbox in pretext_and_prompts:
                     end = "" if text_type =="<inline_math>" else " "
                     whole_markdown += text + end
+                
+                if args.save_boxed_image:save_clean_and_boxed_image(page0,page_idx,png_dir,normed_pretext_and_prompts)
+
         except:
             if args.debug:
                 
