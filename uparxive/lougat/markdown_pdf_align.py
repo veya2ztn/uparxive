@@ -116,8 +116,9 @@ def read_and_standardlize_html(html_path): #"/nvme/zhangtianning/datasets/whole_
     for span in spans:
         colorconfig = span.get('style').split(';')
         colorconfig = [t for t in colorconfig if 'background-color' in t]
+        if len(colorconfig)!=1:continue
         color = colorconfig[0]
-        assert len(colorconfig)==1
+        
         new_content = ' ['+color.replace('background-color:#',"").rstrip(';')+']'+ "FLOATSELEMENT" +'  '
         span.replace_with(BeautifulSoup(f"""<figcaption> |floats_start| {new_content} |floats_end| </figcaption>""",'html.parser').figcaption)
 
@@ -267,8 +268,11 @@ def smart_unicode_to_latex(content):
     return " ".join(new_content)
 
 def remove_comprehensive_color_mode_in_math(mmd):
-    return re.sub(r"\\definecolor(\s*\[.*?\])?\s*\{[^}]*\}\s*\{\s*rgb\s*}\s*\{[^}]*\}", "", mmd)
-
+    
+    mmd = re.sub(r"\\definecolor(\s*\[.*?\])?\s*\{[^}]*\}\s*\{\s*rgb\s*}\s*\{[^}]*\}", "", mmd)
+    mmd = re.sub(r"\\pgfsys@color@gray@stroke\{1\}", "", mmd)
+    mmd = re.sub(r"\\pgfsys@color@gray@fill\{1\}", "", mmd)
+    return mmd
 ### convert to the markdown text
 def soup2mdtext(html):
 
@@ -369,7 +373,11 @@ def simple_math_color_format_normal(latex_input):
         full_match = match.group(1)
         rgb_string = match.group(2)
         rgb_values = rgb_string.split(',')
+        if len(rgb_values)!=3:
+            continue
+
         R, G, B = (round(float(value) * 255) for value in rgb_values)
+        
         
         # Remove the \color[rgb]{a,b,c} part from the match
         cleaned_text = re.sub(r'\\color\s*\[\s*rgb\s*\]\s*\{\s*[^}]+\s*\}', '', full_match).strip()
@@ -551,12 +559,16 @@ def  color_dct_line(line,color,keep_structure,color_manager):
             dct_color[color_manager.shift(color)] = ["<inline_math>",block_content[:matheg.inline_s]]
             for c,text in simple_math_color_format(block_content[matheg.inline_s:-matheg.inline_e]):
                 if c and c!=(0,0,0):
-                    assert c not in dct_color or len(text.strip())==0, f"""
-                    color should be unique {c}, what we get now is 
-                    old text: {dct_color[c]}
-                    new text: {text}
-                    """
-                    dct_color[c] = ["<inline_math>",text]
+                    if len(text.strip())==0:continue
+                    if c in dct_color:
+                        logging.warning(f"""
+                        color should be unique {c}, what we get now is 
+                        old text: {dct_color[c]}
+                        new text: {text}
+                        """)
+                        dct_color[color_manager.shift(c)] = ["<inline_math>",text]   
+                    else:
+                        dct_color[c] = ["<inline_math>",text]
                     color = c
                 else:
                     dct_color[color_manager.shift(color)] = ["<inline_math>",text]
@@ -1275,7 +1287,7 @@ def sequence_sequence_alignment(current_mmd_color_dct,sequence2boxed, recommand_
     color_indexes_map = {color:i for i,(color, text, dtype) in enumerate(sequence1o) if color!=(0,0,0) and is_meaningful_markdonw_color(color)}
     sequence_pdf = sequence2boxed
     color_index_in_pdf = [color_indexes_map[color] for color,_,_ in sequence_pdf if color !=(0,0,0) and color in color_indexes_map] ### some color may appear in caption, then pass
-    if len(color_index_in_pdf)==0: return None, None,0
+    if len(color_index_in_pdf)<=1: return None, None,0
     
 
     mmd_sequence_start  = max(max(0,min(color_index_in_pdf)-1),recommand_start)
@@ -1462,14 +1474,14 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
     pdf      = fitz.open(pdf_file_path)
     pdf0     = fitz.open(now_table_figure_masked_pdf)
     png_dir  = os.path.join(os.path.dirname(os.path.dirname(pdf_file_path)),'boxed_pdf_image')
-
+    
     whole_markdown=""
+    total_pages = len(pdf)
     recommand_start = 0
+    passed_pages = 0
     for page_idx in range(len(pdf)):
         page = pdf[page_idx]
         page0=pdf0[page_idx]
-        
-
         current_mmd_color_dct =mmd_color_dct
         try:
             pretext_and_prompts,true_match,recommand_start = deal_with_single_page(page,current_mmd_color_dct,block_equation_color_map,cap_color_dct,fig_color_dct,color_figid_map,fig_captions_list,recommand_start=recommand_start)
@@ -1499,7 +1511,7 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
                     whole_markdown += text + end
                 
                 if args.save_boxed_image:save_clean_and_boxed_image(page0,page_idx,png_dir,normed_pretext_and_prompts)
-
+            passed_pages+=1
         except:
             if args.debug:
                 
@@ -1508,9 +1520,14 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
             else:
                 logging.warning(f""" ============ fail to processing page {page_idx} ======================= """)
                 continue
-            
+    
+    
+    os.makedirs(png_dir,exist_ok=True)
     with open(os.path.join(png_dir, 'content.md'),'w') as f:
         f.write(whole_markdown)     
+    status = {'total_pages': total_pages, 'passed_pages': passed_pages}
+    with open(os.path.join(png_dir, 'status.json'),'w') as f:
+        json.dump(status, f)
 import traceback
 def deal_with_one_pdf_file_wrapper(args):
     html_path, args = args
@@ -1538,6 +1555,8 @@ def deal_with_one_pdf_file_wrapper(args):
 
 
         return 'pass', html_path
+    except IndexError:
+        return 'TWO_PDF_not_match', html_path
     except Exception as e:
         if args.debug:
             print(f"error for {html_path} with {e}")

@@ -50,7 +50,8 @@ def parse_latexml_children(html: BeautifulSoup, parent: Element,color=None) -> N
         elif sv.match(".ltx_tag", child):
             if "ltx_tag_note" not in classes:
                 if sv.match(".ltx_tag_section", child):
-                    child.string = child.string.upper()
+                    
+                    child.string = child.string.upper() if child.string else ""
                 elif sv.match(".ltx_tag_subsection", child):
                     child.string = ""
                 parse_latexml_children(child, parent)

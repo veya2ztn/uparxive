@@ -1,6 +1,6 @@
 from uparxive.tex_to_xml.standalize_tex import *
 from uparxive.lougat.color_tex import *
-from uparxive.xml_to_json.utils import better_latex_sentense_string
+from uparxive.xml_to_json.utils import better_latex_sentense_string,multispaces_into_singlespace
 import regex
 import numpy as np
 from pdf2image import convert_from_path
@@ -147,7 +147,18 @@ def replace_ref(content, reference_map):
 
     return content
 
+redefine_commands_brack_check_preset={
+    '\\newcommand':['curly','round'],
+    '\\renewcommand':['curly','round'],
+    '\\renewcommand': ['curly','round'],
+}
+
+
 def filter_out_preamble_block(content, redefine_commands=None, layout_commands=None, end="\n"):
+    """
+    scan line by line rather than char by char.
+    
+    """
     assert redefine_commands is not None
     assert layout_commands is not None
     for cmd in redefine_commands:
@@ -170,31 +181,42 @@ def filter_out_preamble_block(content, redefine_commands=None, layout_commands=N
     preamble_block=[]
     layerout_block=[]
     element  =""
-    in_command = False
+    in_command = False ## False mean new line
+
+    brace_check_list = ['curly','square','round']
     for i in range(len(lines)):
         line = lines[i]  # Keep linebreaks
-
+        
         if line.strip().startswith('%'):
             continue
         
         if not in_command:
             if included_commands is None:
                 in_command = "should_comment" if line.lstrip().startswith("\\") else "donot_comment"
+                brace_check_list = ['curly','square','round']
             else:
-                if any(line.lstrip().startswith(cmd) for cmd in included_commands):
+                activated = False
+                for cmd in included_commands:
+                    if line.lstrip().startswith(cmd):
+                        activated = True
+                        break
+                if activated:
                     in_command = "should_comment"
+                    brace_check_list = redefine_commands_brack_check_preset.get(cmd, ['curly','square','round'])
                 else:
                     in_command = "donot_comment"
 
         # If we are inside an excluded command, count braces
         if in_command:
-            brace_counts['curly']  += line.count('{') - line.count('}')
-            brace_counts['square'] += line.count('[') - line.count(']')
-            brace_counts['round']  += line.count('(') - line.count(')')
+            
+            if 'curly'  in brace_check_list:brace_counts['curly']  += line.count('{')  - line.count('}')
+            if 'square' in brace_check_list:brace_counts['square'] += line.count('[') - line.count(']') ## <-- r"\newcommand{\bradot}[3]{\ensuremath{\langle #1|\, #2|#3]}}" if it define an abnormal brace case like \rangle ] .it will fail
+            if 'round'  in brace_check_list:brace_counts['round']  += line.count('(') - line.count(')')
 
             # If all braces are balanced, the command has ended
-            is_commandQ = braces_balanced(brace_counts) and (i==len(lines)-1 or lines[i+1].strip()[0]=='\\')
+            is_commandQ = braces_balanced(brace_counts) and (i==len(lines)-1 or lines[i+1].strip()[0]=='\\') 
             if is_commandQ:
+                
                 in_command = f"end_of_comment.{in_command}"
         #print(brace_counts)
         # Add line to commented_content
@@ -211,9 +233,13 @@ def filter_out_preamble_block(content, redefine_commands=None, layout_commands=N
                     preamble_block.append(element)
             else:
                 elements.append(element)
+            brace_counts = {'curly': 0, 'square': 0, 'round': 0}
             element=""
             in_command = False
 
+
+    if not in_command or not in_command.startswith("end_of_comment"):
+        elements.append(element)
     return '\n'.join(elements), "\n".join(preamble_block), layerout_block
 
 
@@ -587,6 +613,35 @@ def apply_macros(latex_text, commands):
     
     return latex_text
 
+def preprocessing_for_macro(content):
+    """
+    we will detect where is there a area between \\begin{document} to the first \\section{} part.
+    It if existed, we move whole the macro in this area into premble
+    """
+    latex_blocks = blockwise_content(content, blocks=[(r'\\begin{document}.*?\\section\s*{.*?}', 'subpreamble')])
+    redefine_commands = ['\\def','\\Declare', '\\define',
+                         '\\newcommand', '\\let',
+                         '\\def', '\\usepackage',
+                         '\\eqnobysec','\\newenvironment',
+                         '\\newtheorem',
+                         '\\providecommand',
+                         '\\renewcommand', 
+                         '\\documentclass',"\\global"
+                        ]
+    new_latex_blocks = []
+    for _type, content in latex_blocks:
+        if _type == 'subpreamble':
+            for cmd in redefine_commands:
+                content = content.replace(cmd,"\n"+cmd)
+
+            content, command_str, _ =  filter_out_preamble_block(content,redefine_commands = redefine_commands,layout_commands = [] )
+            #print(command_str)
+            content = content.replace('\\begin{document}', command_str+'\n'+'\\begin{document}')
+            #raise
+        new_latex_blocks.append(content)
+    new_latex_blocks = "\n".join(new_latex_blocks)
+    return new_latex_blocks
+
 def expand_macro(contents):
     latex_blocks = blockwise_content(contents, blocks=[(r'\\documentclass.*?\\begin{document}', 'preamble')])
     redefine_commands = ['\\def','\\Declare', '\\define',
@@ -602,17 +657,21 @@ def expand_macro(contents):
     commands = {}
     for _type, content in latex_blocks:
         if _type == 'preamble':
+       
             for cmd in redefine_commands:
                 content = content.replace(cmd,"\n"+cmd)
             _, command_str, _ =  filter_out_preamble_block(content,redefine_commands = redefine_commands,layout_commands = [] )
+            
             #print(command_str)
             commands = parse_redefine(command_str,commands)
-            
-            
+            new_latex_blocks.append(content)
+        
         elif commands: ### <--- may cause unexcep error when replace math
             
             content = apply_macros(content,commands)
-        new_latex_blocks.append(content)
+            new_latex_blocks.append(content)
+        else:
+            new_latex_blocks.append(content)
     new_latex_blocks = "\n".join(new_latex_blocks)
     return new_latex_blocks
 
@@ -668,9 +727,8 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
         
         else:
             _, command_line,_ = filter_out_preamble_block(block_content,redefine_commands=redefine_commands, layout_commands=layout_commands,end=" ")
-
             commands          = parse_redefine(command_line,commands)
-            block_content = apply_macros(block_content, commands)
+            #block_content = apply_macros(block_content, commands)
             if block_type == 'text':
                 ##Find the defination commend and add prefix on them
                 # new_block_content, command_line,layerout_block = filter_out_preamble_block(block_content,
@@ -679,9 +737,13 @@ def process_latex_content(content, collect_preamble=True, color_mode='colorful_t
                 #                                                                     r"\\begin",
                 #                                                                     r"\\end"
                 #                                                                 ])
-
+                
                 envs_blocks = env_partition(block_content)
-                new_blocks.extend(envs_blocks)
+                for env_type, env_content in envs_blocks:
+                    if env_type != 'env':
+                        env_content = apply_macros(env_content, commands)
+                    new_blocks.append([env_type, env_content])
+                #new_blocks.extend(envs_blocks)
                 
             else:
                 new_blocks.append([block_type, block_content])
@@ -1093,10 +1155,13 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
     else:
         content = remove_the_bib(content)
     #content = expand_newcommand_in_latex(content)
+    content = preprocessing_for_macro(content)
     
     content = expand_macro(content) # <-- this is needed since the \begin environment can also be defined in the newcommand
-    
+
     content = preprocess_latex_content(content)
+
+    
     if args.remove_affiliation: content = remove_affiliation_lines(content)
     
 
@@ -1107,7 +1172,7 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
     after_preamble = False
     for key,val in latex_blocks:
         output.append(f"%vvvvvvvvvvvvvvvvvvvvvvv {key} vvvvvvvvvvvvvvvvvvvvvvvvv")
-        
+ 
         if key in ['preamble','env']:
             for commend in ['title', 'author', 'address', 'section','subsection', 'subsubsection', 'chapter', 'paragraph', 'subparagraph']:
                 val = colorful_inside_brace( val,commend,colorful_fun)
@@ -1115,7 +1180,9 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
                 val = "\n".join(re.split(r'\n\s*\n', val))
                 #val,affiliation,_ = remove_affiliation_lines(val)
                 after_preamble = True
-        if not after_preamble:continue
+        if not after_preamble:
+            output.append(val)
+            continue
         if key in ["text","abstract"]:
             #### 
             
