@@ -119,6 +119,7 @@ from TexSoup.utils import Token
 from TexSoup.data import BraceGroup,TexCmd,TexArgs,BracketGroup,TexNamedEnv
 from TexSoup import TexSoup
 default_use_adjoint_char_math_func = set(commands.COMMANDS_WITH_ONE_PARAMETER)|set(commands.LOCAL_FONTS.keys())|{'\\SI'}
+default_use_two_char_math_func = {}#set(commands.COMMANDS_WITH_TWO_PARAMETERS)|{'\\tensor'}
 single_char_math_symbol = MATH
 
 def deal_with_one_envs(elements):
@@ -157,6 +158,26 @@ def deal_with_one_envs(elements):
                         assert not isinstance(elements[i+1], BraceGroup)
 
                     element.args= TexArgs([BraceGroup(first)])
+            elif commend in default_use_two_char_math_func:
+                if len(element.args) == 0:
+                    if i >= len(elements) - 2:
+                        raise NotImplementedError(f"may better remove the part: {element} of {elements}")
+
+                    params = []
+                    for j in range(1, 3):
+                        if isinstance(elements[i + j], Token):
+                            text = elements[i + j].text.strip()
+                            if text:
+                                params.append(text[0])
+                                elements[i + j].text = text[1:] if len(text) > 1 else None
+                        elif isinstance(elements[i + j], TexCmd):
+                            params.append(elements[i + j])
+                            elements[i + j] = None
+                        else:
+                            raise NotImplementedError(f"Unexpected element type for {commend} parameters: {type(elements[i + j])}")
+
+                    element.args = TexArgs([BraceGroup(params[0]), BraceGroup(params[1])])
+                
             elif commend in single_char_math_symbol:
             
                 while len(element.args)>0:
@@ -303,7 +324,7 @@ def treat_seg(seg):
             # 需要和后面[]*{}内容一起保留原样的tag
             elif word in ['\\label','\\begin','\\end','\\includegraphics','\\resizebox','\\cline','\\multicolumn','\\multirow','\\pagestyle','\\email',
                             '\\input','\\bibliographystyle','\\bibliography','\\newcommand','\\usepackage','\\preprint','\\ref','\\url','\\bibitem','\\bibinfo','\\bibnamefont',
-                            '\\SI','\\ang'] \
+                            '\\SI','\\ang','\\item'] \
                             or any(banword in word for banword in ['\\cite','\\ref','hspace','vspace']):  # \\citep,\\citen,\\hspace*
                 ignore_res = re.match(r'\\[A-Za-z]+(?:\[.*?\])*(?:\{.*?\}){1,2}',seg[seg_idx:])
                 new_seg += ignore_res.group(0) if ignore_res else word

@@ -59,9 +59,11 @@ def format_latex_content(content):
     
     return formatted_paragraphs
 
-def read_content_with_input(latex_file_path):
+def read_content_with_input(latex_file_path,deepth=0):
+    if deepth>10:
+        raise FileNotFoundError
     rootpath      = os.path.dirname(latex_file_path)
-    with open(latex_file_path, 'r', encoding='utf-8') as file:
+    with open(latex_file_path, 'r', encoding='utf-8', errors='ignore') as file:
         content_lines = [t.strip() for t in file]
     #input_pattern = re.compile(r'\\input{(.+?)}')
     input_pattern = re.compile(r'\\input\s*{?([^{}\s]+)}?')
@@ -71,7 +73,7 @@ def read_content_with_input(latex_file_path):
             file_name = file_name+'.tex'
         file_path = os.path.join(rootpath,file_name)
         try:
-            return read_content_with_input(file_path)
+            return read_content_with_input(file_path, deepth=deepth+1)
         except FileNotFoundError:
             #logging.warning(f"Warning: '{file_name}' not found.")
             return ''
@@ -90,6 +92,8 @@ def clean_latex_content(content):
         #r'%.*?\n',  # Remove comments
         r'\\hspace(\{(?:[^{}]++|(?1))*\})',
         r'\\href(\{(?:[^{}]++|(?1))*\})',
+        #r'\\emailAdd(\{(?:[^{}]++|(?1))*\})',
+        
         r'\\email(\{(?:[^{}]++|(?1))*\})',
         r'\\subjclass(\[.*?\])?\{(?:[^{}]++|(?1))*\}',
         #r'\\affiliation(\{(?:[^{}]++|(?1))*\})',
@@ -103,7 +107,7 @@ def clean_latex_content(content):
     for pattern in patterns_to_remove:
         content = regex.sub(pattern, '\n', content, flags=regex.DOTALL)
     
-    content = content.replace('\\newblock',"").replace("\\em","").replace('\\~',' ')
+    content = content.replace('\\newblock',"").replace("\\em ","").replace('\\~',' ')
     return content
 
 def replace_ref(content, reference_map):
@@ -289,10 +293,13 @@ def blockwise_content(content, blocks= [
         
         #(r'\\begin{center.*?\\end{center.*?}', 'center'),
         (r'\\begin{thebibliography.*?\\end{thebibliography.*?}', 'thebibliography'),
+        
+        
         (r'\\begin{equation.*?\\end{equation.*?}', 'equation'),
         (r'\\begin{eqnarray.*?\\end{eqnarray.*?}', 'equation'),
         (r'\\\[.*?\\\]', 'equation'),
         (r'\n\$\$.*?\$\$', 'equation'),
+        (r'\\begin{gather}.*?\\end{gather}', 'equation'),
         (r'\\begin{align.*?\\end{align.*?}', 'equation'),
         (r'\\begin{multline.*?\\end{multline.*?}', 'equation'),
 
@@ -343,6 +350,8 @@ def better_document_class(content):
         content = re.sub(r'\\documentstyle(\[[^\]]*\])?\{.*\}', replace_document_class, content)
     return content
 
+section_commands = ['\\section', '\\subsection', '\\subsubsection', '\\paragraph', '\\subparagraph']
+
 def env_partition(content):
     """
     Partition the content based on LaTeX environments and sections.
@@ -352,9 +361,8 @@ def env_partition(content):
     def braces_balanced(brace_counts):
         return all(count == 0 for count in brace_counts.values())
 
-    included_commands = [
-        '\\begin', '\\end', '\\section', '\\subsection', 
-        '\\subsubsection', '\\chapter', '\\paragraph', '\\subparagraph',
+    included_commands = section_commands+[
+        '\\begin', '\\end', 
         '\\def','\\Declare', '\\define',
         '\\newcommand', '\\let',
         '\\def', '\\usepackage', "\\affiliation",
@@ -363,7 +371,7 @@ def env_partition(content):
         '\\providecommand',
         '\\renewcommand', 
         '\\documentclass',"\\global",'\\setlength','\\newcolumntype',
-        '\\twocolumn',"\\if","\\fi","\\thispagestyle","\\pagerange","\\setcounter","\\makebox","\\global"
+        '\\twocolumn',"\\if","\\fi","\\thispagestyle","\\pagerange","\\setcounter","\\makebox","\\global","\\item"
     ]
 
     lines = content.splitlines(True)
@@ -591,7 +599,10 @@ def apply_macros(latex_text, commands):
             # Direct replacement if there are no parameters
             pattern = regex.escape(command[1:]) + r'(?=\s|\Z|\\|\_|\^|\}|\]|\)|\$)'
             #print(pattern,details['definition'])
-            latex_text = re.sub(pattern, details['definition'].replace("\\", "\\\\"), latex_text)
+            real_pattern = details['definition'].replace("\\", "\\\\")
+            if "\\mathcal" in real_pattern:
+                real_pattern = "{" + real_pattern + "}"
+            latex_text = re.sub(pattern, real_pattern, latex_text)
         else:
             
             # Replacement with parameter handling
@@ -884,7 +895,7 @@ def remove_out_the_caption(content, replaced_element="\n"):
 
 def remove_affiliation_lines(content):
     command_pattern = re.compile(
-        r'\\(affiliation)\s*\{',
+        r'\\(affiliation)\s*(\[.*?\])?\s*\{',
         re.DOTALL
     )
     
@@ -1002,8 +1013,9 @@ def wrap_tables_with_tcolorbox(content, names,captions_string, boxfunction=add_c
 
 
 def colorful_inside_brace(content, commend,colorful_fun ):
-    return regex.sub(r'\\'+commend+r'(\{(?:[^{}]++|(?1))*\})',  
-                                 lambda match: '\\'+ commend + '{' + colorful_fun(better_latex_sentense_string(clean_latex_content(match.group(1)[1:-1]))) + '}', 
+    commend = commend.lstrip('\\')
+    return regex.sub(r'\\'+commend+r'(\*?)(\{(?:[^{}]++|(?1))*\})',  
+                                 lambda match: '\\'+ commend + '{' + colorful_fun(better_latex_sentense_string(clean_latex_content(match.group(2)[1:-1]))) + '}', 
                                  content, flags=regex.DOTALL)
 
 def remove_inside_brace(content, commend,colorful_fun ):
@@ -1108,7 +1120,7 @@ def preprocess_latex_content(content):
     # content =  content.replace('\\em ',' ')
     content =  re.sub(r'\\begin\s+\{', r'\\begin{', content)
     content =  re.sub(r'\\end\s+\{', r'\\end{', content)
-    content = content.replace('\\newblock', "").replace("\\em", "").replace('\\~', ' ')
+    content = content.replace('\\newblock', "").replace("\\em ", "").replace('\\~', ' ')
     content = content.replace("\\tableofcontents", "") ### we can not handle content
     #content = expand_macro(content)
     
@@ -1174,13 +1186,16 @@ def formularize_latex(file_path, colorful_fun,args:PrepareColorFulConfig):
         output.append(f"%vvvvvvvvvvvvvvvvvvvvvvv {key} vvvvvvvvvvvvvvvvvvvvvvvvv")
  
         if key in ['preamble','env']:
-            for commend in ['title', 'author', 'address', 'section','subsection', 'subsubsection', 'chapter', 'paragraph', 'subparagraph']:
+            for commend in ['title', 'author', 'address'] + section_commands :
                 val = colorful_inside_brace( val,commend,colorful_fun)
             if key == 'preamble':
                 val = "\n".join(re.split(r'\n\s*\n', val))
                 #val,affiliation,_ = remove_affiliation_lines(val)
                 after_preamble = True
         if not after_preamble:
+            output.append(val)
+            continue
+        if key in ['donotcolor']:
             output.append(val)
             continue
         if key in ["text","abstract"]:
@@ -1298,6 +1313,7 @@ def get_the_resource_path(file_path, args):
 
 import shutil
 def process_one_file(file_path, args:PrepareColorFulConfig):
+    
     if args.mode == 'remove_color_mask':
 
         return convert_color_tex_into_nocolor_tex(file_path)
@@ -1318,7 +1334,7 @@ def process_one_file(file_path, args:PrepareColorFulConfig):
         
         return save_path,'AlreadyDone'
     #tqdm.write(file_path)
-    
+    tqdm.write(f"[Now for] {file_path}")
     errortable_path, output = formularize_latex(file_path,colorful_fun,args)
     if args.mode == 'judge_element':
         status = 'HasAlgorithm' if output else 'NoAlgorithm'

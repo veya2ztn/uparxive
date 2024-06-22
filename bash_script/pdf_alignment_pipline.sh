@@ -66,9 +66,9 @@ do
         fi
 
         ## if ORIGINALTEXPATH, TEXTONLYPDFPATH and COLORFULPDFPATH existed
-        if [ -e "$COLORFULHTMLPATH" ] && [ -e "$TEXTONLYPDFPATH" ] && [ -e "$COLORFULPDFPATH" ] && [ ! -e "$OUTPUTFIE" ]; then
-            python /nas/zhangtianning.di/projects/unique_data_build/python_script/pdf_box_aligned.py --root $COLORFULHTMLPATH
-        fi
+        # if [ -e "$COLORFULHTMLPATH" ] && [ -e "$TEXTONLYPDFPATH" ] && [ -e "$COLORFULPDFPATH" ] && [ ! -e "$OUTPUTFIE" ]; then
+        #     python /nas/zhangtianning.di/projects/unique_data_build/python_script/pdf_box_aligned.py --root $COLORFULHTMLPATH
+        # fi
 
     fi
 

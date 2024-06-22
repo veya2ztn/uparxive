@@ -41,10 +41,10 @@ def deal_with_one_pdf_file_wrapper(args):
     
     if not os.path.exists(COLORFULPDFPATH):
         tex_to_pdf(tex_path, args)
-    if os.path.exists(TEXTONLYPDFPATH) and os.path.exists(COLORFULPDFPATH) and os.path.exists(COLORFULHTMLPATH) and not os.path.exists(OUTPUTFIE):
-        pdf_alignment(COLORFULHTMLPATH, COLORFULPDFPATH, args)
+    # if os.path.exists(TEXTONLYPDFPATH) and os.path.exists(COLORFULPDFPATH) and os.path.exists(COLORFULHTMLPATH) and not os.path.exists(OUTPUTFIE):
+    #     pdf_alignment(COLORFULHTMLPATH, COLORFULPDFPATH, args)
     
-    if os.path.exists(OUTPUTFIE):
+    if os.path.exists(TEXTONLYPDFPATH) and os.path.exists(COLORFULPDFPATH) and os.path.exists(COLORFULHTMLPATH):
         return 'success', tex_path
     else:
         return 'fail', tex_path
