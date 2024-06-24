@@ -298,7 +298,7 @@ def blockwise_content(content, blocks= [
         (r'\\begin{equation.*?\\end{equation.*?}', 'equation'),
         (r'\\begin{eqnarray.*?\\end{eqnarray.*?}', 'equation'),
         (r'\\\[.*?\\\]', 'equation'),
-        (r'\n\$\$.*?\$\$', 'equation'),
+        (r'\$\$.*?\$\$', 'equation'),
         (r'\\begin{gather}.*?\\end{gather}', 'equation'),
         (r'\\begin{align.*?\\end{align.*?}', 'equation'),
         (r'\\begin{multline.*?\\end{multline.*?}', 'equation'),
@@ -1334,7 +1334,7 @@ def process_one_file(file_path, args:PrepareColorFulConfig):
         
         return save_path,'AlreadyDone'
     #tqdm.write(file_path)
-    tqdm.write(f"[Now for] {file_path}")
+    #tqdm.write(f"[Now for] {file_path}")
     errortable_path, output = formularize_latex(file_path,colorful_fun,args)
     if args.mode == 'judge_element':
         status = 'HasAlgorithm' if output else 'NoAlgorithm'

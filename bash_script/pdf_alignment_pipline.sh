@@ -54,7 +54,7 @@ do
         fi
         if [ ! -e "$TEXTONLYPDFPATH" ]; then
             python /nas/zhangtianning.di/projects/unique_data_build/python_script/discard_color_box.py --root $texfilepath
-            latexmk -quiet -silent -synctex=0 -pdflatex="pdflatex -interaction=nonstopmode" -file-line-error -pdf -f -outdir=$paper_fold/temp -cd $texfilepath
+            latexmk -quiet -silent -synctex=0 -pdflatex="pdflatex -interaction=nonstopmode" -file-line-error -f -outdir=$paper_fold/temp -cd $texfilepath
             mv $COLORFULPDFPATH $TEXTONLYPDFPATH
             cp $ORIGINALTEXPATH $texfilepath 
         fi
@@ -62,7 +62,7 @@ do
             cp $ORIGINALTEXPATH $texfilepath 
         fi
         if [ ! -e "$COLORFULPDFPATH" ]; then
-            latexmk -quiet -silent -synctex=0 -pdflatex="pdflatex -interaction=nonstopmode" -file-line-error -pdf -f -outdir=$paper_fold/temp -cd $texfilepath
+            latexmk -quiet -silent -synctex=0 -pdflatex="pdflatex -interaction=nonstopmode" -file-line-error -f -outdir=$paper_fold/temp -cd $texfilepath
         fi
 
         ## if ORIGINALTEXPATH, TEXTONLYPDFPATH and COLORFULPDFPATH existed

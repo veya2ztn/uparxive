@@ -33,6 +33,7 @@ do
         #if [ ! -e "$OUTPUTFIE" ]; then
             #latexml --noparse --nocomments --includestyles --log="$LOGFILE" --path="$paper_fold" --dest="$OUTPUTFIE" "$texfilename.tex"
             timeout 120 latexmk -quiet -silent -synctex=0 -pdflatex="pdflatex -interaction=nonstopmode" -file-line-error -pdf -f -outdir=temp -cd $texfilepath > /dev/null
+            #timeout 120 latexmk -quiet -silent -synctex=0 -xelatex="xelatex -interaction=nonstopmode" -file-line-error -f -outdir=temp -cd $texfilepath > /dev/null
         #fi
 
     fi
