@@ -1500,12 +1500,19 @@ def deal_with_one_pdf_file(html_path, pdf_file_path,args):
                 if args.verbose:
                     tqdm.write(f""" ============= for page {page_idx}, we get {len(normed_pretext_and_prompts)} box =================== """)
                 
-                
-                boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.csv")
+                saved_pretext_and_prompts = []
+                for markdown, pdf_text, status, text_type, bbox in normed_pretext_and_prompts:
+                    if bbox is None:
+                        bbox = [[0,0],[0,0]]
+
+                    saved_pretext_and_prompts.append([markdown, pdf_text, status, text_type, bbox])
+                # boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.csv")
+                # os.makedirs(os.path.dirname(boxed_info),exist_ok=True)
+                # df = pd.DataFrame(saved_pretext_and_prompts, columns=['markdown','pdf','status','text_type','bbox_x0', 'bbox_y0', 'bbox_x1', 'bbox_y1'])
+                # df.to_csv(boxed_info)
+                boxed_info  = os.path.join(png_dir, 'text_bbox',f"page_{page_idx}.json")
                 os.makedirs(os.path.dirname(boxed_info),exist_ok=True)
-                df = pd.DataFrame(normed_pretext_and_prompts, columns=['markdown','pdf','status','text_type','bbox'])
-                df.to_csv(boxed_info)
-  
+                with open(boxed_info,'w') as f:json.dump(saved_pretext_and_prompts,f)
                 for text, _, _, text_type, bbox in pretext_and_prompts:
                     end = "" if text_type =="<inline_math>" else " "
                     whole_markdown += text + end

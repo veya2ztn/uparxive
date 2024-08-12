@@ -44,13 +44,16 @@ def process_files(func, file_list, args:BatchModeConfig):
             results = list(tqdm(pool.imap(func, args_list), total=len(file_list)))
     return results
 
-
+import json
 def obtain_processed_filelist(args:BatchModeConfig):
     ROOT_PATH = args.root_path
     index_part= args.index_part
     num_parts = args.num_parts
 
-    if os.path.isfile(ROOT_PATH):
+    if ROOT_PATH.endswith('.json'):
+        with open(ROOT_PATH,'r') as f:
+            alread_processing_file_list = json.load(f)
+    elif os.path.isfile(ROOT_PATH):
         if ROOT_PATH.endswith('.filelist'):
             with open(ROOT_PATH,'r') as f:
                 alread_processing_file_list = [t.strip() for t in f.readlines()]
