@@ -45,7 +45,7 @@ To effectively collect and process data from the arXiv source, follow the outlin
 ### Tools and Resources for Data Collection
 
 #### 1. **Download Arxiv Source Files**
-   - **arXiv Bulk Data Access**: Access and download bulk data directly from arXiv using the AWS S3 `request-payer` dataset. Detailed instructions and access points can be found here: [arXiv Bulk Data Access](https://info.arxiv.org/help/bulk_data.html). or check [this](https://towardsdatascience.com/how-to-bulk-access-arxiv-full-text-preprints-58026e19e8ef)
+   - **arXiv Bulk Data Access**: Access and download bulk data directly from arXiv using the AWS S3 `request-payer` dataset. Detailed instructions and access points can be found here: [arXiv Bulk Data Access](https://info.arxiv.org/help/bulk_data.html). or check [this](https://towardsdatascience.com/how-to-bulk-access-arxiv-full-text-preprints-58026e19e8ef) and [this](https://github.com/armancohan/arxiv-tools)
    - **arXiv API**: For more specific data needs or metadata, use the arXiv API. Documentation and usage guidelines are available here: [arXiv API](https://info.arxiv.org/help/api/index.html).
      - **Important Note**: When crawling arXiv source files, ensure to use `export.arxiv.org` instead of the official `arxiv.org` domain to avoid overloading the main site.
 
