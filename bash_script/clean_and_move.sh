@@ -1,0 +1,2 @@
+python uparxive/tex_to_xml/move_successed_xml_fold.py --root analysis/tex_to_xml/warning.filelist --mode normal
+python uparxive/tex_to_xml/move_successed_xml_fold.py --root analysis/tex_to_xml/success.filelist --mode normal
